@@ -2,12 +2,11 @@
 //! the current page. Click or drag to move through the recording.
 
 use eframe::egui::{self, Align2, Color32, ColorImage, CornerRadius, Rect, Sense, Stroke, StrokeKind, TextureOptions, pos2, vec2};
-use oink_eeg::edf::AnnotationSource;
 use oink_eeg::overview::Overview;
 
 use super::doc::Doc;
 use super::theme::{self, Palette};
-use super::traces::{chip, fmt_clock};
+use super::traces::{event_color, fmt_clock};
 
 pub struct Navigator {
     texture: Option<egui::TextureHandle>,
@@ -49,16 +48,25 @@ impl Navigator {
         for &(a, b) in &doc.gaps {
             p.rect_filled(Rect::from_min_max(pos2(x_of(a), strip.top()), pos2(x_of(b), strip.bottom())), 0.0, pal.grid_strong);
         }
-        // Events: a tick along the top edge.
+        // Events along the top edge: spans as a bar in their label's colour, instants as ticks.
+        let edge = p.with_clip_rect(strip.shrink(1.0));
         let mut last_x = f32::NEG_INFINITY;
-        for a in &doc.annotations {
+        for (i, a) in doc.annotations.iter().enumerate() {
+            if !doc.event_shown(i) {
+                continue;
+            }
+            let color = event_color(doc, i, pal);
+            if a.duration > 0.0 {
+                let (x0, x1) = (x_of(a.onset), x_of(a.onset + a.duration));
+                edge.rect_filled(Rect::from_min_max(pos2(x0, strip.top()), pos2(x1.max(x0 + 1.0), strip.top() + 5.0)), 0.0, color);
+                continue;
+            }
             let x = x_of(a.onset).round() + 0.5;
             if x - last_x < 1.0 {
                 continue;
             }
             last_x = x;
-            let color = if a.source == AnnotationSource::Trigger { pal.trigger } else { pal.event };
-            p.vline(x, strip.top()..=strip.top() + 7.0, Stroke::new(1.0f32, color));
+            edge.vline(x, strip.top()..=strip.top() + 7.0, Stroke::new(1.0f32, color));
         }
         p.rect_stroke(strip, CornerRadius::same(5), Stroke::new(1.0f32, pal.border), StrokeKind::Inside);
 
@@ -74,8 +82,6 @@ impl Navigator {
         }
         if let Some(pos) = resp.hover_pos() {
             p.vline(pos.x, strip.y_range(), Stroke::new(1.0f32, pal.text.gamma_multiply(0.5)));
-            let t = t_of(pos.x);
-            chip(p, pos2(pos.x, strip.top() - 2.0), Align2::CENTER_BOTTOM, &doc.file.clock(t).time_string(false), pal.text, pal.raised, pal.border);
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
 

@@ -2,7 +2,7 @@
 
 A small, fast viewer for EEG recordings in EDF, EDF+, BDF and BDF+. Native on macOS and Windows: Rust, with traces drawn on the GPU through wgpu (Metal on macOS, DirectX 12 on Windows).
 
-**[Download for macOS or Windows](../../releases/latest)**, then click **Try the sample recording** to see it with real EEG straight away.
+**[Download for macOS or Windows](../../releases/latest)**, then pick one of the two samples on the start screen to see it with real EEG straight away.
 
 ![Double banana montage with a selected channel, a time measurement, and the montage drawn on the head](docs/viewer.jpg)
 
@@ -16,8 +16,9 @@ A small, fast viewer for EEG recordings in EDF, EDF+, BDF and BDF+. Native on ma
   - Negative is up (the EDF+ convention); this is a setting.
   - Filters are zero-phase Butterworth, with the stated cutoff as the true −3 dB point.
   - A calibrated scale bar is always visible.
-- **Comes with a sample recording,** so there is something to look at before you have your own file.
-- **Small.** The macOS app is about 12 MB and the Windows `.exe` about 16 MB, both including the 3.8 MB built-in sample. It uses about 70–110 MB of memory and no CPU while idle.
+- **Shows labelled events.** EDF+ annotations with a duration are tinted across the traces in their label's colour, so a recording's structure (task blocks, sleep stages, seizures) shows at a glance, in the traces and along the overview. Tick labels on and off in the Events tab. An annotation tied to one signal with the EDF+ `@@` convention ("Spike@@EEG C3-REF", as MNE writes) is drawn on that signal's lanes only.
+- **Comes with two sample recordings,** so there is something to look at before you have your own file: eyes-closed resting EEG (19 channels), and motor imagery with labelled events (64 channels).
+- **Small.** The macOS download is about 18 MB (one app for Apple silicon and Intel) and the Windows `.exe` about 19 MB, both including the 6.4 MB of built-in samples. It uses about 70–110 MB of memory and no CPU while idle.
 
 | | |
 |---|---|
@@ -91,7 +92,7 @@ The toolbar shows the four things that change how EEG looks: montage, filters, s
 **Sidebar**
 
 - **Montage:** the head diagram (or a scalp map, from the **Map** menu), a summary of what was identified (for example "19/19 standard 10-20 sites · referenced to REF · T3/T4/T5/T6 naming"), labels that could not be placed, and a channel list with show/hide.
-- **Events:** EDF+ annotations and decoded trigger codes, searchable. Click one to jump to it.
+- **Events:** EDF+ annotations and decoded trigger codes, searchable. Each distinct label has a colour and a tick box, most frequent first; **On traces** hides them all from the trace view. Click an event to jump to it. Clicking an event with a duration, here or on the traces, also selects it, so the scalp map shows that span.
 - **File:** recording and patient fields (EDF+ subfields decoded), every signal's header, and a header check that explains problems in plain language, such as a truncated file or a digital range that does not fit the sample size.
 
 **Overview strip.** The strip along the bottom is a spectral overview (density spectral array) of the whole recording. Each frequency is shown relative to its own median, so sleep stages, seizures and artefacts stand out. Event ticks run along its top edge. It is computed in the background, coarse to fine, so a long recording has a usable overview within a moment.
@@ -106,7 +107,8 @@ Each electrode is taken against the average of all scalp electrodes, whatever mo
 **Command line**
 
 ```
-oink --sample                   # open the built-in sample recording
+oink --sample                   # open the resting-EEG sample
+oink --sample motor             # open the motor-imagery sample, with labelled events
 oink --info recording.edf       # what the viewer makes of a file: header, leads, montages, warnings
 oink recording.edf --montage banana --at 600 --page 20 --theme dark
 oink recording.edf --map alpha-delta    # start with a scalp map (delta, theta, alpha, ... slow-fast)
@@ -212,11 +214,11 @@ src/platform.rs   screen size, system fonts, Finder "open file" events
 src/icon.rs       the app icon (a piglet in an EEG headset), drawn in code
 tests/files.rs    end-to-end tests on generated EDF/BDF files
 scripts/          macOS app and disk image, Windows cross-compile
-samples/          the built-in sample recording and its source and license
+samples/          the built-in sample recordings, their sources and licenses
 examples/         dump.rs (print samples, for cross-checking), synth.rs (large synthetic files)
 ```
 
-`cargo test` runs the unit tests and generated-file tests: shuffled channel order, EDF+D gaps, sub-second starts, 24-bit BDF and Status triggers, truncated files, mixed sampling rates and mV units, and band-power maps that find alpha and delta where a file puts them. The bundled sample's band powers are checked against SciPy's Welch estimate. Decoded samples and annotations were also cross-checked against MNE on a real Nihon Kohden recording.
+`cargo test` runs the unit tests and generated-file tests: shuffled channel order, EDF+D gaps, sub-second starts, 24-bit BDF and Status triggers, truncated files, mixed sampling rates and mV units, band-power maps that find alpha and delta where a file puts them, and annotations tied to one signal with `@@`. The bundled sample's band powers are checked against SciPy's Welch estimate. Decoded samples and annotations were also cross-checked against MNE on a real Nihon Kohden recording.
 
 ## Limitations
 
@@ -228,8 +230,9 @@ examples/         dump.rs (print samples, for cross-checking), synth.rs (large s
 
 ## Credits
 
-The built-in sample is `Subject00_1.edf` from [*EEG During Mental Arithmetic Tasks*](https://physionet.org/content/eegmat/1.0.0/) on PhysioNet. It is distributed unmodified under the [Open Data Commons Attribution License v1.0](https://opendatacommons.org/licenses/by/1-0/); see [samples/README.md](samples/README.md).
+The built-in samples come from PhysioNet and are distributed unmodified under the [Open Data Commons Attribution License v1.0](https://opendatacommons.org/licenses/by/1-0/); see [samples/README.md](samples/README.md).
 
-Zyma I, Tukaev S, Seleznov I, Kiyono K, Popov A, Chernykh M, Shpenkov O. Electroencephalograms during Mental Arithmetic Task Performance. *Data*. 2019; 4(1):14. https://doi.org/10.3390/data4010014
+- `Subject00_1.edf`, from [*EEG During Mental Arithmetic Tasks*](https://physionet.org/content/eegmat/1.0.0/). Zyma I, Tukaev S, Seleznov I, Kiyono K, Popov A, Chernykh M, Shpenkov O. Electroencephalograms during Mental Arithmetic Task Performance. *Data*. 2019; 4(1):14. https://doi.org/10.3390/data4010014
+- `S001R04.edf`, from the [*EEG Motor Movement/Imagery Dataset*](https://physionet.org/content/eegmmidb/1.0.0/) (https://doi.org/10.13026/C28G6P). Schalk G, McFarland DJ, Hinterberger T, Birbaumer N, Wolpaw JR. BCI2000: A General-Purpose Brain-Computer Interface (BCI) System. *IEEE Transactions on Biomedical Engineering*. 2004; 51(6):1034-1043.
 
 Built with [egui](https://github.com/emilk/egui), [wgpu](https://wgpu.rs), [winit](https://github.com/rust-windowing/winit), [rfd](https://github.com/PolyMeilie/rfd), [rayon](https://github.com/rayon-rs/rayon) and [RustFFT](https://github.com/ejmahler/RustFFT).

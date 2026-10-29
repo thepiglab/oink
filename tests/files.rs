@@ -139,6 +139,10 @@ fn edf_plus_header_rates_and_subsecond_start() {
             if r == 3 {
                 t.extend_from_slice(b"+3.25\x1512\x14Seizure onset\x14\x00");
             }
+            if r == 4 {
+                // One about a single signal (EDF+ "@@" convention), one naming no signal.
+                t.extend_from_slice(b"+4.5\x152\x14Spike@@eeg fp1-ref\x14\x00+5\x14Note@@nowhere\x14\x00");
+            }
             t
         },
     );
@@ -165,8 +169,8 @@ fn edf_plus_header_rates_and_subsecond_start() {
     assert!(f.read_window(&[0], 0.0, 0.25).unwrap()[0].data.iter().all(|v| v.is_nan()));
 
     let a = f.read_annotations().unwrap();
-    assert_eq!(a.len(), 1);
-    assert_eq!((a[0].onset, a[0].duration, a[0].text.as_str()), (3.25, 12.0, "Seizure onset"));
+    let got: Vec<_> = a.iter().map(|a| (a.onset, a.duration, a.text.as_str(), a.signal)).collect();
+    assert_eq!(got, [(3.25, 12.0, "Seizure onset", None), (4.5, 2.0, "Spike", Some(0)), (5.0, 0.0, "Note@@nowhere", None)]);
 }
 
 #[test]
@@ -433,6 +437,28 @@ fn sample_band_powers_match_scipy() {
         let p = s.powers.iter().find(|p| p.electrode == e).unwrap();
         let (a, d) = (Measure::Alpha.value(p).unwrap(), Measure::Delta.value(p).unwrap());
         assert!((a - alpha).abs() < 0.01 && (d - delta).abs() < 0.01, "{name}: alpha {a:.4} vs {alpha}, delta {d:.4} vs {delta}");
+    }
+}
+
+#[test]
+fn motor_sample_has_its_labelled_events() {
+    let file = EdfFile::open(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/S001R04.edf")).unwrap();
+    assert!(file.warnings.is_empty(), "{:?}", file.warnings);
+    let leads = LeadSet::identify(&file.signals);
+    assert_eq!((leads.summary.eeg, leads.summary.ten_twenty), (64, 19));
+    assert!(leads.summary.unplaced.is_empty(), "{:?}", leads.summary.unplaced);
+
+    let a = file.read_annotations().unwrap();
+    let count = |code: &str| a.iter().filter(|e| e.text == code).count();
+    assert_eq!((a.len(), count("T0"), count("T1"), count("T2")), (30, 15, 8, 7));
+    assert!(a.iter().all(|e| (4.0..4.3).contains(&e.duration) && e.signal.is_none()));
+    assert_eq!(a[0].onset, 0.0);
+    for pair in a.windows(2) {
+        assert!((pair[0].onset + pair[0].duration - pair[1].onset).abs() < 0.01, "back to back");
+    }
+    let stats = pipeline::signal_stats(&file, &leads);
+    for (id, m) in montage::catalog(&leads, &file.signals, &stats) {
+        assert!(m.is_ok(), "{id:?}: {:?}", m.err());
     }
 }
 

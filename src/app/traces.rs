@@ -1,7 +1,7 @@
 //! The trace view: channel labels, time axis, the GPU-drawn traces, and everything drawn over
 //! them (grid, annotations, cursor readout, measurement, scale bar).
 
-use eframe::egui::{self, Align2, Color32, CornerRadius, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2};
+use eframe::egui::{self, Align2, Color32, CornerRadius, Rangef, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2};
 use eframe::egui_wgpu;
 use oink_eeg::dsp::BREAK;
 use oink_eeg::edf::AnnotationSource;
@@ -98,7 +98,9 @@ pub fn ui(ui: &mut egui::Ui, doc: &mut Doc, s: &mut Settings, env: &Env) {
         }
     }
     draw_grid(&p, plot, doc.t0, page, pal);
-    draw_annotation_bands(&p, plot, doc, page, pal);
+    if s.show_annotations {
+        draw_annotation_bands(&p, plot, doc, &lanes, page, pal);
+    }
     if let Some((a, b)) = doc.measure {
         let (a, b) = (a.min(b), a.max(b));
         let r = Rect::from_min_max(pos2(x_of(a), plot.top()), pos2(x_of(b), plot.bottom()));
@@ -141,15 +143,19 @@ pub fn ui(ui: &mut egui::Ui, doc: &mut Doc, s: &mut Settings, env: &Env) {
         }
     }
 
-    annotation_markers(ui, plot, doc, page, pal);
+    if s.show_annotations {
+        annotation_markers(ui, plot, doc, &lanes, page, pal);
+    }
 
     // Cursor and value readout.
     let hover = resp.hover_pos().filter(|_| !resp.dragged());
+    // The pointer's time, drawn over the axis once that is drawn.
+    let mut time_chip = None;
     if let Some(pos) = hover {
         p.vline(pos.x, plot.y_range(), Stroke::new(1.0f32, pal.faint));
         let t = t_of(pos.x);
         let label = doc.file.clock(t).time_string(true);
-        chip(ui.painter(), pos2(pos.x, axis.center().y), Align2::CENTER_CENTER, &label, pal.text, pal.raised, pal.border);
+        time_chip = Some((pos2(pos.x, axis.center().y), label));
         if let Some(ch) = lane_at(&lanes, doc.v_scroll, plot, pos.y) {
             if let Some(text) = readout(doc, ch, t, 0.75 / pts_per_sec) {
                 let c = &doc.montage.channels[ch];
@@ -182,6 +188,9 @@ pub fn ui(ui: &mut egui::Ui, doc: &mut Doc, s: &mut Settings, env: &Env) {
     }
     draw_labels(ui, gutter, plot, doc, s, &lanes, pal, &label_font);
     draw_axis(ui.painter(), axis, full, doc, page, pts_per_sec, pal);
+    if let Some((at, label)) = &time_chip {
+        chip(ui.painter(), *at, Align2::CENTER_CENTER, label, pal.text, pal.raised, pal.border);
+    }
 
     if let Some(err) = &doc.read_error {
         chip(&p, plot.center_bottom() - vec2(0.0, 12.0), Align2::CENTER_BOTTOM, err, pal.warn, pal.raised, pal.border);
@@ -321,7 +330,7 @@ fn draw_axis(p: &egui::Painter, axis: Rect, full: Rect, doc: &Doc, page: f64, pt
         let x = x_of(t).round() + 0.5;
         p.vline(x, (axis.bottom() - 5.0)..=axis.bottom(), Stroke::new(1.0f32, pal.faint));
         let text = doc.file.clock(t).time_string(step < 1.0);
-        let text = if step < 1.0 { text.trim_end_matches('0').to_string() } else { text };
+        let text = if step < 1.0 { text.trim_end_matches('0').trim_end_matches('.').to_string() } else { text };
         let galley = p.layout_no_wrap(text, theme::font(11.5), pal.muted);
         let half = galley.size().x / 2.0;
         if x - half >= axis.left() + 2.0 && x + half <= axis.right() - 2.0 {
@@ -339,24 +348,53 @@ fn draw_axis(p: &egui::Painter, axis: Rect, full: Rect, doc: &Doc, page: f64, pt
     );
 }
 
-fn draw_annotation_bands(p: &egui::Painter, plot: Rect, doc: &Doc, page: f64, pal: &Palette) {
+/// The colour of annotation `i`: its label's, or the default for where it came from.
+pub fn event_color(doc: &Doc, i: usize, pal: &Palette) -> Color32 {
+    match doc.label(i).and_then(|l| l.color) {
+        Some(c) => pal.labels[c],
+        None if doc.annotations[i].source == AnnotationSource::Trigger => pal.trigger,
+        None => pal.event,
+    }
+}
+
+/// Vertical extents of the lanes drawn from file signal `s`.
+fn signal_lanes<'a>(doc: &'a Doc, lanes: &'a Lanes, plot: Rect, s: usize) -> impl Iterator<Item = Rangef> + 'a {
+    lanes.rows.iter().filter(move |(i, _)| doc.montage.channels[*i].terms.iter().any(|t| t.0 as usize == s)).map(move |&(_, yc)| {
+        let y = plot.top() + yc - doc.v_scroll;
+        Rangef::new(y - lanes.lane_h / 2.0, y + lanes.lane_h / 2.0)
+    })
+}
+
+/// Annotations with a duration, tinted in their label's colour: across every lane, or only the
+/// lanes of the signal an annotation is about.
+fn draw_annotation_bands(p: &egui::Painter, plot: Rect, doc: &Doc, lanes: &Lanes, page: f64, pal: &Palette) {
     let pts_per_sec = plot.width() as f64 / page;
     let x_of = |t: f64| plot.left() + ((t - doc.t0) * pts_per_sec) as f32;
     let t1 = doc.t0 + page;
-    for a in &doc.annotations {
+    for (i, a) in doc.annotations.iter().enumerate() {
         if a.onset > t1 {
             break;
         }
-        if a.duration <= 0.0 || a.onset + a.duration < doc.t0 {
+        if a.duration <= 0.0 || a.onset + a.duration < doc.t0 || !doc.event_shown(i) {
             continue;
         }
-        let color = if a.source == AnnotationSource::Trigger { pal.trigger.gamma_multiply(0.12) } else { pal.event_soft };
-        p.rect_filled(Rect::from_min_max(pos2(x_of(a.onset), plot.top()), pos2(x_of(a.onset + a.duration), plot.bottom())), 0.0, color);
+        let color = event_color(doc, i, pal).gamma_multiply(0.14);
+        let x = Rangef::new(x_of(a.onset), x_of(a.onset + a.duration));
+        match a.signal {
+            Some(s) => {
+                for y in signal_lanes(doc, lanes, plot, s) {
+                    p.rect_filled(Rect::from_x_y_ranges(x, y), 0.0, color);
+                }
+            }
+            None => {
+                p.rect_filled(Rect::from_x_y_ranges(x, plot.y_range()), 0.0, color);
+            }
+        }
     }
 }
 
 /// Event lines and labelled chips along the top of the plot.
-fn annotation_markers(ui: &egui::Ui, plot: Rect, doc: &mut Doc, page: f64, pal: &Palette) {
+fn annotation_markers(ui: &egui::Ui, plot: Rect, doc: &mut Doc, lanes: &Lanes, page: f64, pal: &Palette) {
     let pts_per_sec = plot.width() as f64 / page;
     let x_of = |t: f64| plot.left() + ((t - doc.t0) * pts_per_sec) as f32;
     let p = ui.painter_at(plot);
@@ -368,14 +406,22 @@ fn annotation_markers(ui: &egui::Ui, plot: Rect, doc: &mut Doc, page: f64, pal: 
         if a.onset > t1 {
             break;
         }
-        let color = if a.source == AnnotationSource::Trigger { pal.trigger } else { pal.event };
+        if !doc.event_shown(i) {
+            continue;
+        }
+        let color = event_color(doc, i, pal);
         let x = x_of(a.onset).round() + 0.5;
         let selected = doc.selected_event == Some(i);
         let stroke = Stroke::new(if selected { 1.5f32 } else { 1.0 }, if selected { color } else { color.gamma_multiply(0.7) });
-        p.extend(Shape::dashed_line(&[pos2(x, plot.top()), pos2(x, plot.bottom())], stroke, 4.0, 3.0));
+        let line = |y: Rangef| Shape::dashed_line(&[pos2(x, y.min), pos2(x, y.max)], stroke, 4.0, 3.0);
+        match a.signal {
+            Some(s) => signal_lanes(doc, lanes, plot, s).for_each(|y| p.extend(line(y))),
+            None => p.extend(line(plot.y_range())),
+        }
 
-        let mut text: String = a.text.chars().take(28).collect();
-        if a.text.chars().count() > 28 {
+        let full = doc.event_text(i);
+        let mut text: String = full.chars().take(28).collect();
+        if full.chars().count() > 28 {
             text.push('\u{2026}');
         }
         let galley = ui.painter().layout_no_wrap(text, theme::font(11.0), color);
@@ -392,10 +438,10 @@ fn annotation_markers(ui: &egui::Ui, plot: Rect, doc: &mut Doc, page: f64, pal: 
         }
         let when = doc.file.clock(a.onset).time_string(true);
         let dur = if a.duration > 0.0 { format!("  \u{b7}  {}", fmt_seconds(a.duration)) } else { String::new() };
-        resp.on_hover_text(format!("{}\n{when}{dur}", a.text));
+        resp.on_hover_text(format!("{full}\n{when}{dur}"));
     }
     if let Some(i) = clicked {
-        doc.selected_event = Some(i);
+        doc.select_event(i);
     }
 }
 

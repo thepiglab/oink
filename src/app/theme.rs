@@ -27,10 +27,21 @@ pub struct Palette {
     pub grid: Color32,
     pub grid_strong: Color32,
     pub event: Color32,
-    pub event_soft: Color32,
     pub trigger: Color32,
     pub head: Color32,
     pub warn: Color32,
+    /// Annotation labels, most frequent first (see `doc::Label`).
+    pub labels: [Color32; LABEL_COLORS],
+}
+
+/// Annotation labels that get a colour of their own; the rest share `Palette::event`.
+pub const LABEL_COLORS: usize = 8;
+
+impl Palette {
+    /// The colour of an annotation label: one of `labels`, or the default event colour.
+    pub fn label(&self, color: Option<usize>) -> Color32 {
+        color.map_or(self.event, |c| self.labels[c % LABEL_COLORS])
+    }
 }
 
 const fn rgb(hex: u32) -> Color32 {
@@ -67,10 +78,19 @@ pub const LIGHT: Palette = Palette {
     grid: rgb(0xF0F0F3),
     grid_strong: rgb(0xE0E0E6),
     event: rgb(0xB4730F),
-    event_soft: rgba(0xD69A2D, 0x24),
     trigger: rgb(0x0E8A7A),
     head: rgb(0xC5C5CD),
     warn: rgb(0xB45309),
+    labels: [
+        rgb(0xB4730F),
+        rgb(0x0E8A7A),
+        rgb(0x7B4FD0),
+        rgb(0xC2347A),
+        rgb(0x3C8A2E),
+        rgb(0x1B86B0),
+        rgb(0x8C6239),
+        rgb(0x6A7A12),
+    ],
 };
 
 pub const DARK: Palette = Palette {
@@ -92,10 +112,19 @@ pub const DARK: Palette = Palette {
     grid: rgb(0x1A1B1E),
     grid_strong: rgb(0x25262B),
     event: rgb(0xE2A84F),
-    event_soft: rgba(0xE2A84F, 0x22),
     trigger: rgb(0x3CC2AE),
     head: rgb(0x4B4C54),
     warn: rgb(0xF59E0B),
+    labels: [
+        rgb(0xE2A84F),
+        rgb(0x3CC2AE),
+        rgb(0xB49BFF),
+        rgb(0xF07AB0),
+        rgb(0x7CCB6A),
+        rgb(0x5CC3E6),
+        rgb(0xD9A273),
+        rgb(0xC5D35A),
+    ],
 };
 
 pub fn palette(ctx: &egui::Context) -> &'static Palette {

@@ -1,7 +1,7 @@
 //! An open recording: the file, what was identified in it, the current view, and the
 //! background work that feeds the view.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -16,10 +16,24 @@ use oink_eeg::montage::{self, Montage, MontageId, SignalStats};
 use oink_eeg::overview::{self, Overview};
 use oink_eeg::pipeline::{self, TraceData, TraceRequest};
 
+use super::sample::Sample;
 use super::scalp::{MapKey, MapResult, MapWorker};
+use super::theme::LABEL_COLORS;
 
 /// Smallest lane height in points; with more channels than fit, the trace view scrolls.
 pub const MIN_LANE: f32 = 12.0;
+
+/// One distinct annotation text: how often it occurs, its colour, and whether it is shown.
+pub struct Label {
+    pub text: String,
+    /// What the label means, for the built-in samples' codes ("T1": "imagined left fist").
+    pub meaning: Option<&'static str>,
+    pub count: usize,
+    /// Index into the palette's label colours. The most frequent labels get one each; the rest
+    /// share the default event colour.
+    pub color: Option<usize>,
+    pub shown: bool,
+}
 
 pub struct MontageEntry {
     pub id: MontageId,
@@ -68,6 +82,13 @@ pub struct Doc {
     pub gaps: Vec<(f64, f64)>,
     pub annotations: Vec<Annotation>,
     pub annotations_ready: bool,
+    /// Distinct annotation texts, and each annotation's index into them.
+    pub labels: Vec<Label>,
+    label_of: Vec<usize>,
+    /// The Events tab lists every label rather than the most frequent.
+    pub labels_expanded: bool,
+    /// The built-in sample this is, if it is one.
+    sample: Option<&'static Sample>,
     pub overview: Option<Overview>,
     /// Bumped whenever `overview` changes, so the navigator rebuilds its texture.
     pub overview_version: u64,
@@ -105,10 +126,12 @@ impl Doc {
         Self::new(file, preferred, ctx)
     }
 
-    /// The recording built into the app.
-    pub fn open_sample(preferred: MontageId, ctx: &egui::Context) -> Result<Doc, String> {
-        let file = EdfFile::from_static(super::sample::NAME, super::sample::BYTES).map_err(|e| e.to_string())?;
-        Self::new(file, preferred, ctx)
+    /// A recording built into the app.
+    pub fn open_sample(sample: &'static Sample, preferred: MontageId, ctx: &egui::Context) -> Result<Doc, String> {
+        let file = EdfFile::from_static(sample.name, sample.bytes).map_err(|e| e.to_string())?;
+        let mut doc = Self::new(file, preferred, ctx)?;
+        doc.sample = Some(sample);
+        Ok(doc)
     }
 
     fn new(file: EdfFile, preferred: MontageId, ctx: &egui::Context) -> Result<Doc, String> {
@@ -185,6 +208,10 @@ impl Doc {
             range,
             annotations: Vec::new(),
             annotations_ready: false,
+            labels: Vec::new(),
+            label_of: Vec::new(),
+            labels_expanded: false,
+            sample: None,
             overview: None,
             overview_version: 0,
             traces: None,
@@ -292,6 +319,10 @@ impl Doc {
     /// Picks up results from background threads.
     pub fn poll(&mut self) {
         if let Ok(a) = self.annotations_rx.try_recv() {
+            (self.labels, self.label_of) = group_labels(&a);
+            for l in &mut self.labels {
+                l.meaning = self.sample.and_then(|s| s.labels.iter().find(|(code, _)| *code == l.text)).map(|(_, m)| *m);
+            }
             self.annotations = a;
             self.annotations_ready = true;
         }
@@ -453,10 +484,67 @@ impl Doc {
         self.maps.as_ref().and_then(MapWorker::requested).is_some_and(|k| self.scalp.as_ref().is_none_or(|(have, _)| *have != k))
     }
 
+    /// The label of annotation `i`.
+    pub fn label(&self, i: usize) -> Option<&Label> {
+        self.label_of.get(i).map(|&l| &self.labels[l])
+    }
+
+    /// Whether annotation `i` is shown: its label is ticked in the Events tab.
+    pub fn event_shown(&self, i: usize) -> bool {
+        self.label(i).is_none_or(|l| l.shown)
+    }
+
+    /// Annotation `i`'s text, with what it means and the channel it is about, where known.
+    pub fn event_text(&self, i: usize) -> String {
+        let a = &self.annotations[i];
+        let mut text = a.text.clone();
+        if let Some(m) = self.label(i).and_then(|l| l.meaning) {
+            text = format!("{text} \u{b7} {m}");
+        }
+        if let Some(lead) = a.signal.and_then(|s| self.leads.leads.iter().find(|l| l.signal == s)) {
+            text = format!("{text} \u{b7} {}", lead.display);
+        }
+        text
+    }
+
+    /// Selects annotation `i`. One with a duration also becomes the measured span, which the
+    /// scalp map follows.
+    pub fn select_event(&mut self, i: usize) {
+        self.selected_event = Some(i);
+        let a = &self.annotations[i];
+        if a.duration > 0.0 {
+            self.measure = Some((a.onset, a.onset + a.duration));
+        }
+    }
+
     /// Channels whose derivation involves `e`.
     pub fn channels_with(&self, e: ElectrodeId) -> impl Iterator<Item = usize> + '_ {
         self.montage.channels.iter().enumerate().filter(move |(_, c)| c.a == Some(e) || c.b == Some(e)).map(|(i, _)| i)
     }
+}
+
+/// Groups annotations by text. The most frequent labels get a colour each (ties keep the order
+/// they first appear in); the rest share the default event colour.
+fn group_labels(annotations: &[Annotation]) -> (Vec<Label>, Vec<usize>) {
+    let mut index: HashMap<&str, usize> = HashMap::new();
+    let mut labels: Vec<Label> = Vec::new();
+    let label_of = annotations
+        .iter()
+        .map(|a| {
+            let l = *index.entry(a.text.as_str()).or_insert_with(|| {
+                labels.push(Label { text: a.text.clone(), meaning: None, count: 0, color: None, shown: true });
+                labels.len() - 1
+            });
+            labels[l].count += 1;
+            l
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..labels.len()).collect();
+    order.sort_by_key(|&l| std::cmp::Reverse(labels[l].count));
+    for (rank, &l) in order.iter().take(LABEL_COLORS).enumerate() {
+        labels[l].color = Some(rank);
+    }
+    (labels, label_of)
 }
 
 fn is_trigger_channel(label: &str) -> bool {
@@ -525,5 +613,25 @@ impl TraceWorker {
 
     fn take(&self) -> Option<(u64, Arc<TraceData>)> {
         self.done.lock().unwrap_or_else(|e| e.into_inner()).take()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oink_eeg::edf::AnnotationSource;
+
+    #[test]
+    fn labels_are_grouped_and_coloured_by_frequency() {
+        let event = |text: &str| Annotation { onset: 0.0, duration: 0.0, text: text.into(), source: AnnotationSource::Annotation, signal: None };
+        let mut events: Vec<Annotation> = ["T0", "T2", "T0", "T1", "T0", "T1"].into_iter().map(event).collect();
+        events.extend((0..10).map(|k| event(&format!("note {k}"))));
+        let (labels, of) = group_labels(&events);
+        assert_eq!(labels.len(), 13);
+        assert_eq!((labels[of[0]].text.as_str(), labels[of[0]].count, labels[of[0]].color), ("T0", 3, Some(0)));
+        assert_eq!(labels[of[3]].color, Some(1), "T1, twice");
+        assert_eq!(labels[of[1]].color, Some(2), "T2, once but before the notes");
+        assert_eq!(labels.iter().filter(|l| l.color.is_some()).count(), LABEL_COLORS);
+        assert!(labels.iter().all(|l| l.shown));
     }
 }

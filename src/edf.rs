@@ -190,6 +190,9 @@ pub struct Annotation {
     pub duration: f64,
     pub text: String,
     pub source: AnnotationSource,
+    /// The signal it is about, from the EDF+ convention "text@@signal label" (the label is
+    /// then removed from `text`). `None` for the whole recording.
+    pub signal: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -784,6 +787,16 @@ impl EdfFile {
             true
         })?;
         annotations.sort_by(|a, b| a.onset.total_cmp(&b.onset));
+        // "text@@label" ties an annotation to one signal (EDF+ standard texts; MNE writes it too).
+        for a in &mut annotations {
+            let Some(at) = a.text.rfind("@@") else { continue };
+            let (text, label) = (a.text[..at].trim_end(), a.text[at + 2..].trim());
+            let signal = self.signals.iter().find(|s| !s.is_annotation && s.label.trim().eq_ignore_ascii_case(label));
+            if let (Some(s), false) = (signal, text.is_empty()) {
+                a.signal = Some(s.index);
+                a.text = text.to_string();
+            }
+        }
         Ok((starts, annotations))
     }
 
@@ -819,6 +832,7 @@ impl EdfFile {
                                 duration: t - onset,
                                 text: format!("Trigger {c}"),
                                 source: AnnotationSource::Trigger,
+                                signal: None,
                             });
                         }
                         if code != 0 {
@@ -835,6 +849,7 @@ impl EdfFile {
                 duration: last_t - onset,
                 text: format!("Trigger {c}"),
                 source: AnnotationSource::Trigger,
+                signal: None,
             });
         }
         Ok(events)
@@ -901,7 +916,7 @@ pub fn parse_tals(bytes: &[u8], first_in_record: bool, out: &mut Vec<Annotation>
         for t in texts {
             let text = String::from_utf8_lossy(t).trim().to_string();
             if !text.is_empty() {
-                out.push(Annotation { onset, duration, text, source: AnnotationSource::Annotation });
+                out.push(Annotation { onset, duration, text, source: AnnotationSource::Annotation, signal: None });
             }
         }
     }

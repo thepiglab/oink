@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use doc::Doc;
 use headmap::HeadMap;
 use navigator::Navigator;
+pub use sample::SAMPLES;
 pub use sidebar::Tab;
 use theme::Palette;
 use traces::{Env, PAGES, SENSITIVITIES, fmt_page};
@@ -57,6 +58,8 @@ pub struct Settings {
     pub tab: Tab,
     /// Scalp map drawn on the sidebar's head instead of the montage's lines.
     pub map: Option<Measure>,
+    /// Annotations drawn over the traces (bands and labels).
+    pub show_annotations: bool,
     pub recent: Vec<PathBuf>,
 }
 
@@ -73,6 +76,7 @@ impl Default for Settings {
             sidebar: true,
             tab: Tab::Montage,
             map: None,
+            show_annotations: true,
             recent: Vec::new(),
         }
     }
@@ -89,8 +93,8 @@ pub struct Launch {
     pub sidebar: Option<bool>,
     pub tab: Option<Tab>,
     pub map: Option<Measure>,
-    /// Open the built-in sample recording.
-    pub sample: bool,
+    /// Open this built-in sample (an index into `SAMPLES`).
+    pub sample: Option<usize>,
     /// Render a frame to this PNG and quit.
     pub screenshot: Option<PathBuf>,
     /// Open a menu at start ("montage", "filters", "settings", "map"), for screenshots.
@@ -171,8 +175,8 @@ impl App {
             title: String::new(),
             open_menu: launch.menu,
         };
-        if launch.sample {
-            app.open_sample(&cc.egui_ctx);
+        if let Some(k) = launch.sample {
+            app.open_sample(&cc.egui_ctx, k);
         } else if let Some(path) = launch.file {
             app.open(&cc.egui_ctx, path);
         }
@@ -213,9 +217,13 @@ impl App {
         }
     }
 
-    fn open_sample(&mut self, ctx: &egui::Context) {
-        match Doc::open_sample(self.settings.montage, ctx) {
+    fn open_sample(&mut self, ctx: &egui::Context, k: usize) {
+        let sample = &SAMPLES[k];
+        match Doc::open_sample(sample, sample.montage.unwrap_or(self.settings.montage), ctx) {
             Ok(doc) => {
+                if let Some(v) = sample.sensitivity {
+                    self.settings.sensitivity = v;
+                }
                 self.doc = Some(doc);
                 self.error = None;
             }
@@ -592,11 +600,15 @@ impl App {
         }
         ui.label(RichText::new(format!("{CMD}O")).color(pal.faint).small());
         ui.add_space(16.0);
-        let sample = ui.add(egui::Button::new(RichText::new("Try the sample recording").color(pal.accent)).frame(false));
-        if sample.clicked() {
-            self.open_sample(&ctx);
+        ui.label(RichText::new("TRY A SAMPLE").font(theme::font(10.5)).color(pal.muted).extra_letter_spacing(0.6));
+        ui.add_space(2.0);
+        for (k, s) in SAMPLES.iter().enumerate() {
+            if ui.add(egui::Button::new(RichText::new(s.title).color(pal.accent)).frame(false)).clicked() {
+                self.open_sample(&ctx, k);
+            }
+            ui.label(RichText::new(s.description).color(pal.faint).small());
+            ui.add_space(4.0);
         }
-        ui.label(RichText::new(sample::DESCRIPTION).color(pal.faint).small());
         if let Some(err) = &self.error {
             ui.add_space(10.0);
             ui.label(RichText::new(err).color(pal.warn));

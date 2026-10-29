@@ -1,7 +1,6 @@
 //! The sidebar: montage on the head, events, and file details.
 
 use eframe::egui::{self, Align, CornerRadius, Layout, RichText, ScrollArea, Sense, vec2};
-use oink_eeg::edf::AnnotationSource;
 use oink_eeg::leads::{Kind, Numbering};
 use oink_eeg::maps;
 use serde::{Deserialize, Serialize};
@@ -10,7 +9,7 @@ use super::doc::Doc;
 use super::headmap::{self, HeadMap};
 use super::scalp::{self, ScalpMap};
 use super::theme::{self, Palette};
-use super::traces::{fmt_clock, fmt_hz, fmt_seconds, trace_color};
+use super::traces::{event_color, fmt_clock, fmt_hz, fmt_seconds, trace_color};
 use super::widgets;
 use super::{Settings, focus_search_id};
 
@@ -224,7 +223,7 @@ fn map_caption(doc: &Doc, m: &ScalpMap) -> String {
     text
 }
 
-fn events_tab(ui: &mut egui::Ui, doc: &mut Doc, s: &Settings, pal: &Palette) {
+fn events_tab(ui: &mut egui::Ui, doc: &mut Doc, s: &mut Settings, pal: &Palette) {
     if !doc.annotations_ready {
         ui.label(RichText::new("Reading annotations\u{2026}").color(pal.muted));
         return;
@@ -233,6 +232,7 @@ fn events_tab(ui: &mut egui::Ui, doc: &mut Doc, s: &Settings, pal: &Palette) {
         ui.label(RichText::new("No annotations or trigger events in this file.").color(pal.muted));
         return;
     }
+    labels(ui, doc, s, pal);
     let search = ui.add(
         egui::TextEdit::singleline(&mut doc.event_filter)
             .hint_text("Filter events")
@@ -263,12 +263,19 @@ fn events_tab(ui: &mut egui::Ui, doc: &mut Doc, s: &Settings, pal: &Palette) {
             } else if resp.hovered() {
                 ui.painter().rect_filled(rect, CornerRadius::same(4), pal.hover);
             }
-            let color = if a.source == AnnotationSource::Trigger { pal.trigger } else { pal.event };
+            let shown = doc.event_shown(i);
+            let color = if shown { event_color(doc, i, pal) } else { pal.faint };
             ui.painter().circle_filled(rect.left_center() + vec2(8.0, 0.0), 3.0, color);
             let time = doc.file.clock(a.onset).time_string(false);
             ui.painter().text(rect.left_center() + vec2(18.0, 0.0), egui::Align2::LEFT_CENTER, time, theme::mono(11.5), pal.muted);
-            let text_color = if in_view || selected { pal.text } else { pal.text.gamma_multiply(0.8) };
-            let mut text = a.text.clone();
+            let text_color = if !shown {
+                pal.faint
+            } else if in_view || selected {
+                pal.text
+            } else {
+                pal.text.gamma_multiply(0.8)
+            };
+            let mut text = doc.event_text(i);
             if a.duration > 0.0 {
                 text += &format!("  \u{b7} {}", fmt_seconds(a.duration));
             }
@@ -283,24 +290,73 @@ fn events_tab(ui: &mut egui::Ui, doc: &mut Doc, s: &Settings, pal: &Palette) {
             if resp.clicked() {
                 jump = Some(i);
             }
-            resp.on_hover_text(format!("{}\n+{}", a.text, fmt_clock(a.onset - doc.range.0)));
+            resp.on_hover_text(format!("{}\n+{}", doc.event_text(i), fmt_clock(a.onset - doc.range.0)));
         }
     });
     if let Some(i) = jump {
-        doc.selected_event = Some(i);
+        doc.select_event(i);
         doc.jump_to(doc.annotations[i].onset, s.page);
     }
+}
+
+/// The distinct labels, most frequent first: tick to show, with their colour and count.
+fn labels(ui: &mut egui::Ui, doc: &mut Doc, s: &mut Settings, pal: &Palette) {
+    const FEW: usize = 6;
+    ui.horizontal(|ui| {
+        widgets::heading(ui, pal, "Labels");
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.checkbox(&mut s.show_annotations, RichText::new("On traces").small())
+                .on_hover_text("Draw annotations over the traces");
+        });
+    });
+    let mut order: Vec<usize> = (0..doc.labels.len()).collect();
+    order.sort_by_key(|&l| std::cmp::Reverse(doc.labels[l].count));
+    let n = if doc.labels_expanded { order.len() } else { order.len().min(FEW) };
+    for &l in &order[..n] {
+        let label = &mut doc.labels[l];
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut label.shown, "");
+            widgets::dot(ui, if label.shown { pal.label(label.color) } else { pal.faint });
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.label(RichText::new(label.count.to_string()).color(pal.faint).small());
+                let (code, meaning) = if label.shown { (pal.text, pal.muted) } else { (pal.faint, pal.faint) };
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    // The code, then what it means where that is known (the built-in samples).
+                    match label.meaning {
+                        Some(m) => {
+                            ui.label(RichText::new(&label.text).color(code));
+                            ui.add(egui::Label::new(RichText::new(m).color(meaning)).truncate());
+                        }
+                        None => {
+                            ui.add(egui::Label::new(RichText::new(&label.text).color(code)).truncate());
+                        }
+                    }
+                });
+            });
+        });
+    }
+    if order.len() > FEW {
+        let text = if doc.labels_expanded { "Fewer".to_string() } else { format!("All {} labels", order.len()) };
+        if ui.small_button(text).clicked() {
+            doc.labels_expanded = !doc.labels_expanded;
+        }
+    }
+    ui.add_space(8.0);
 }
 
 fn file_tab(ui: &mut egui::Ui, doc: &mut Doc, pal: &Palette) {
     let f = &doc.file;
     ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        if f.in_memory() {
+        if let Some(sample) = super::sample::named(&f.file_name()).filter(|_| f.in_memory()) {
             widgets::heading(ui, pal, "Sample recording");
-            ui.label(super::sample::DESCRIPTION);
-            ui.label(RichText::new(super::sample::CREDIT).color(pal.muted).small());
-            ui.label(RichText::new(super::sample::LICENSE).color(pal.muted).small());
-            ui.hyperlink_to(RichText::new(super::sample::DOI).small(), super::sample::DOI);
+            ui.label(sample.description);
+            if !sample.labels.is_empty() {
+                let codes: Vec<String> = sample.labels.iter().map(|(code, m)| format!("{code} {m}")).collect();
+                ui.label(RichText::new(format!("Events: {}", codes.join(" \u{b7} "))).small());
+            }
+            ui.label(RichText::new(sample.credit).color(pal.muted).small());
+            ui.label(RichText::new(sample.license).color(pal.muted).small());
+            ui.hyperlink_to(RichText::new(sample.link).small(), sample.link);
             ui.add_space(6.0);
         }
         widgets::heading(ui, pal, "Recording");

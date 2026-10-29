@@ -16,7 +16,7 @@ Oink: a small, fast viewer for EDF, EDF+, BDF and BDF+ recordings.
 
 Usage:
   oink [FILE] [options]
-  oink --sample           open the built-in sample recording
+  oink --sample [NAME]    open a built-in sample: resting (the default) or motor
   oink --info FILE        print what the viewer makes of a file and exit
 
 Options:
@@ -43,7 +43,7 @@ enum Command {
 fn parse(args: &[String]) -> Result<Command, String> {
     let mut launch = Launch::default();
     let mut size = None;
-    let mut it = args.iter().filter(|a| !a.starts_with("-psn_"));
+    let mut it = args.iter().filter(|a| !a.starts_with("-psn_")).peekable();
     while let Some(arg) = it.next() {
         let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
         match arg.as_str() {
@@ -80,7 +80,14 @@ fn parse(args: &[String]) -> Result<Command, String> {
                 })
             }
             "--no-sidebar" => launch.sidebar = Some(false),
-            "--sample" => launch.sample = true,
+            "--sample" => {
+                // An optional sample name may follow.
+                let named = it.peek().and_then(|a| app::SAMPLES.iter().position(|s| s.key == a.as_str()));
+                if named.is_some() {
+                    it.next();
+                }
+                launch.sample = Some(named.unwrap_or(0));
+            }
             "--tab" => {
                 use app::Tab;
                 launch.tab = Some(match value("--tab")?.as_str() {
