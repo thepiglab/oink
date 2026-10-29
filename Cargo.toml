@@ -1,0 +1,44 @@
+[package]
+name = "oink-eeg"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Oink: a small, fast EDF/EDF+/BDF EEG viewer"
+publish = false
+
+[[bin]]
+name = "oink"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.33", default-features = false, features = ["wgpu", "persistence", "accesskit", "default_fonts"] }
+rfd = "0.15"
+rayon = "1.10"
+realfft = "3.4"
+serde = { version = "1", features = ["derive"] }
+bytemuck = { version = "1", features = ["derive"] }
+png = "0.18"
+winit = { version = "0.30", default-features = false }
+# Native backends only: Metal on macOS; DX12, with Vulkan and OpenGL fallbacks, on Windows.
+wgpu = { version = "27", default-features = false, features = ["std", "parking_lot", "wgsl", "metal", "dx12", "vulkan", "gles"] }
+egui-wgpu = { version = "0.33", default-features = false, features = ["macos-window-resize-jitter-fix"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString", "NSURL"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_HiDpi", "Win32_System_Console"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 2
