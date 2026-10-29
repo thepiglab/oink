@@ -1,17 +1,24 @@
 #!/usr/bin/env bash
 # Builds "Oink.app" and a .dmg into dist/.
-# The app is universal (Apple silicon + Intel) when both Rust targets are installed:
+# The app is universal (Apple silicon + Intel) when the toolchain ($RUSTUP_TOOLCHAIN, else stable)
+# has both Rust targets:
 #   rustup target add aarch64-apple-darwin x86_64-apple-darwin
+# The disk image is laid out by dmgbuild, which needs uv or pipx to run.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 APP="dist/Oink.app"
+TOOLCHAIN=${RUSTUP_TOOLCHAIN:-stable}
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
 
-targets=$(rustup target list --installed 2>/dev/null || true)
+targets=$(rustup target list --installed --toolchain "$TOOLCHAIN" 2>/dev/null || true)
 if grep -q aarch64-apple-darwin <<<"$targets" && grep -q x86_64-apple-darwin <<<"$targets"; then
-  rustup run stable cargo build --release --target aarch64-apple-darwin
-  rustup run stable cargo build --release --target x86_64-apple-darwin
+  # One cargo run builds both targets in parallel. RUSTC is pinned too, or cargo may pick up another
+  # rustc on PATH (Homebrew's, say) that lacks the targets.
+  RUSTC=$(rustup which --toolchain "$TOOLCHAIN" rustc) \
+    rustup run "$TOOLCHAIN" cargo build --release --target aarch64-apple-darwin --target x86_64-apple-darwin
   mkdir -p target/universal
   lipo -create -output target/universal/oink \
     target/aarch64-apple-darwin/release/oink target/x86_64-apple-darwin/release/oink
@@ -26,7 +33,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/oink"
 
 # The icon is drawn by the app itself.
-ICONSET="$(mktemp -d)/AppIcon.iconset"
+ICONSET="$WORK/AppIcon.iconset"
 mkdir -p "$ICONSET"
 for s in 16 32 128 256 512; do
   "$BIN" --write-icon "$ICONSET/icon_${s}x${s}.png" "$s"
@@ -85,7 +92,21 @@ PLIST
 # signature and notarisation.
 codesign --force --sign - "$APP"
 
+# The disk image opens on Oink, an arrow and an Applications link to drag it onto. dmgbuild writes
+# Finder's window layout itself; scripting Finder to do it is unreliable on CI.
+if command -v uvx >/dev/null; then
+  DMGBUILD=(uvx dmgbuild@1.6.7)
+elif command -v pipx >/dev/null; then
+  DMGBUILD=(pipx run --spec dmgbuild==1.6.7 dmgbuild)
+else
+  echo "Building the disk image needs uv or pipx, to run dmgbuild." >&2
+  exit 1
+fi
+osascript -l JavaScript scripts/dmg-background.js "$WORK/background.png" 1
+osascript -l JavaScript scripts/dmg-background.js "$WORK/background@2x.png" 2
+tiffutil -cathidpicheck "$WORK/background.png" "$WORK/background@2x.png" -out "$WORK/background.tiff"
+
 DMG="dist/Oink-${VERSION}-macos.dmg"
 rm -f "$DMG"
-hdiutil create -quiet -volname "Oink" -srcfolder "$APP" -ov -format UDZO "$DMG"
+"${DMGBUILD[@]}" -s scripts/dmg-settings.py -D app="$APP" -D background="$WORK/background.tiff" Oink "$DMG"
 echo "Built $APP and $DMG"

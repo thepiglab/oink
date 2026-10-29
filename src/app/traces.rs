@@ -103,8 +103,8 @@ pub fn ui(ui: &mut egui::Ui, doc: &mut Doc, s: &mut Settings, env: &Env) {
         let (a, b) = (a.min(b), a.max(b));
         let r = Rect::from_min_max(pos2(x_of(a), plot.top()), pos2(x_of(b), plot.bottom()));
         p.rect_filled(r, 0.0, pal.accent_soft);
-        p.vline(r.left(), plot.y_range(), Stroke::new(1.0, pal.accent));
-        p.vline(r.right(), plot.y_range(), Stroke::new(1.0, pal.accent));
+        p.vline(r.left(), plot.y_range(), Stroke::new(1.0f32, pal.accent));
+        p.vline(r.right(), plot.y_range(), Stroke::new(1.0f32, pal.accent));
     }
 
     // The traces.
@@ -146,7 +146,7 @@ pub fn ui(ui: &mut egui::Ui, doc: &mut Doc, s: &mut Settings, env: &Env) {
     // Cursor and value readout.
     let hover = resp.hover_pos().filter(|_| !resp.dragged());
     if let Some(pos) = hover {
-        p.vline(pos.x, plot.y_range(), Stroke::new(1.0, pal.faint));
+        p.vline(pos.x, plot.y_range(), Stroke::new(1.0f32, pal.faint));
         let t = t_of(pos.x);
         let label = doc.file.clock(t).time_string(true);
         chip(ui.painter(), pos2(pos.x, axis.center().y), Align2::CENTER_CENTER, &label, pal.text, pal.raised, pal.border);
@@ -287,7 +287,7 @@ fn draw_grid(p: &egui::Painter, plot: Rect, t0: f64, page: f64, pal: &Palette) {
             return;
         }
         for k in first..=last {
-            p.vline(x_of(k as f64 * step).round() + 0.5, plot.y_range(), Stroke::new(1.0, color));
+            p.vline(x_of(k as f64 * step).round() + 0.5, plot.y_range(), Stroke::new(1.0f32, color));
         }
     };
     if pts_per_sec * 0.2 >= 14.0 {
@@ -308,7 +308,7 @@ fn tick_step(pts_per_sec: f64) -> f64 {
 
 fn draw_axis(p: &egui::Painter, axis: Rect, full: Rect, doc: &Doc, page: f64, pts_per_sec: f64, pal: &Palette) {
     let p = p.with_clip_rect(axis.union(Rect::from_min_max(full.min, pos2(axis.left(), axis.bottom()))));
-    p.hline(full.x_range(), axis.bottom() - 0.5, Stroke::new(1.0, pal.border));
+    p.hline(full.x_range(), axis.bottom() - 0.5, Stroke::new(1.0f32, pal.border));
     let step = tick_step(pts_per_sec);
     let day = doc.file.start.hour as f64 * 3600.0 + doc.file.start.minute as f64 * 60.0 + doc.file.start.second as f64;
     let first = ((doc.t0 + day) / step).ceil();
@@ -319,7 +319,7 @@ fn draw_axis(p: &egui::Painter, axis: Rect, full: Rect, doc: &Doc, page: f64, pt
             break;
         }
         let x = x_of(t).round() + 0.5;
-        p.vline(x, (axis.bottom() - 5.0)..=axis.bottom(), Stroke::new(1.0, pal.faint));
+        p.vline(x, (axis.bottom() - 5.0)..=axis.bottom(), Stroke::new(1.0f32, pal.faint));
         let text = doc.file.clock(t).time_string(step < 1.0);
         let text = if step < 1.0 { text.trim_end_matches('0').to_string() } else { text };
         let galley = p.layout_no_wrap(text, theme::font(11.5), pal.muted);
@@ -371,7 +371,7 @@ fn annotation_markers(ui: &egui::Ui, plot: Rect, doc: &mut Doc, page: f64, pal: 
         let color = if a.source == AnnotationSource::Trigger { pal.trigger } else { pal.event };
         let x = x_of(a.onset).round() + 0.5;
         let selected = doc.selected_event == Some(i);
-        let stroke = Stroke::new(if selected { 1.5 } else { 1.0 }, if selected { color } else { color.gamma_multiply(0.7) });
+        let stroke = Stroke::new(if selected { 1.5f32 } else { 1.0 }, if selected { color } else { color.gamma_multiply(0.7) });
         p.extend(Shape::dashed_line(&[pos2(x, plot.top()), pos2(x, plot.bottom())], stroke, 4.0, 3.0));
 
         let mut text: String = a.text.chars().take(28).collect();
@@ -384,7 +384,7 @@ fn annotation_markers(ui: &egui::Ui, plot: Rect, doc: &mut Doc, page: f64, pal: 
         rows[row] = x + w;
         let rect = Rect::from_min_size(pos2(x, plot.top() + 4.0 + row as f32 * 20.0), vec2(w, 17.0));
         p.rect_filled(rect, CornerRadius::same(4), if selected { color.gamma_multiply(0.22) } else { pal.bg.gamma_multiply(0.92) });
-        p.rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0, color.gamma_multiply(0.45)), StrokeKind::Inside);
+        p.rect_stroke(rect, CornerRadius::same(4), Stroke::new(1.0f32, color.gamma_multiply(0.45)), StrokeKind::Inside);
         p.galley(rect.min + vec2(5.0, (rect.height() - galley.size().y) / 2.0), galley, color);
         let resp = ui.interact(rect, ui.id().with(("event", i)), Sense::click());
         if resp.clicked() {
@@ -410,7 +410,7 @@ fn draw_labels(
     font: &egui::FontId,
 ) {
     let p = ui.painter_at(gutter);
-    p.vline(gutter.right() - 0.5, gutter.y_range(), Stroke::new(1.0, pal.border));
+    p.vline(gutter.right() - 0.5, gutter.y_range(), Stroke::new(1.0f32, pal.border));
     let small = lanes.lane_h < 15.0;
     let font = if small { theme::font(10.5) } else { font.clone() };
     let mut hovered = None;
@@ -499,7 +499,7 @@ fn scale_bar(p: &egui::Painter, plot: Rect, s: &Settings, env: &Env, lanes: &Lan
     let corner = pos2(plot.right() - 18.0, plot.bottom() - 26.0);
     let bg = Rect::from_min_max(pos2(corner.x - w - 60.0, corner.y - h - 8.0), pos2(corner.x + 8.0, corner.y + 19.0));
     p.rect_filled(bg, CornerRadius::same(6), pal.bg.gamma_multiply(0.78));
-    let stroke = Stroke::new(1.6, pal.text);
+    let stroke = Stroke::new(1.6f32, pal.text);
     let left = corner.x - w;
     p.line_segment([pos2(left, corner.y - h), pos2(left, corner.y)], stroke);
     p.line_segment([pos2(left, corner.y), pos2(corner.x, corner.y)], stroke);
@@ -538,7 +538,7 @@ fn draw_traces_cpu(p: &egui::Painter, plot: Rect, doc: &Doc, data: &oink_eeg::pi
             continue;
         }
         let color = Color32::from_rgba_premultiplied(c.color as u8, (c.color >> 8) as u8, (c.color >> 16) as u8, (c.color >> 24) as u8);
-        let stroke = Stroke::new(if c.flags & FLAG_HIGHLIGHT != 0 { 1.8 } else { 1.0 }, color);
+        let stroke = Stroke::new(if c.flags & FLAG_HIGHLIGHT != 0 { 1.8f32 } else { 1.0 }, color);
         let mut line = Vec::new();
         for pt in &data.points[range.start as usize..range.end as usize] {
             if pt.ch == BREAK {
@@ -563,7 +563,7 @@ pub fn chip(p: &egui::Painter, pos: egui::Pos2, align: Align2, text: &str, fg: C
     let size = galley.size() + vec2(12.0, 6.0);
     let rect = align.anchor_size(pos, size);
     p.rect_filled(rect, CornerRadius::same(5), bg);
-    p.rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0, border), StrokeKind::Inside);
+    p.rect_stroke(rect, CornerRadius::same(5), Stroke::new(1.0f32, border), StrokeKind::Inside);
     p.galley(rect.min + vec2(6.0, 3.0), galley, fg);
 }
 

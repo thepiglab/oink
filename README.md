@@ -26,7 +26,7 @@ A small, fast viewer for EEG recordings in EDF, EDF+, BDF and BDF+. Native on ma
 
 The easiest way is to download a build from [Releases](../../releases/latest). The builds aren't signed with a paid developer certificate, so the first launch asks once:
 
-- **macOS:** System Settings → Privacy & Security → **Open Anyway**.
+- **macOS:** drag Oink from the disk image into Applications and open it. When macOS says it could not verify Oink, click Done, then System Settings → Privacy & Security → **Open Anyway**.
 - **Windows:** SmartScreen → **More info → Run anyway**.
 
 To build it yourself:
@@ -37,7 +37,7 @@ To build it yourself:
 ./scripts/bundle-macos.sh
 ```
 
-This builds `dist/Oink.app` and `dist/Oink-0.1.0-macos.dmg`. Drag the app into Applications. It then opens `.edf`, `.bdf` and `.rec` files from Finder, by double-click, with "Open With", or by dropping a file on its Dock icon. The script builds a universal (Apple silicon + Intel) app when both Rust targets are installed. The app is ad-hoc signed, which is enough on your own Mac; other Macs need a Developer ID signature and notarisation.
+This builds `dist/Oink.app` and `dist/Oink-0.1.0-macos.dmg`. Drag the app into Applications. It then opens `.edf`, `.bdf` and `.rec` files from Finder, by double-click, with "Open With", or by dropping a file on its Dock icon. The script builds a universal (Apple silicon + Intel) app when both Rust targets are installed, and lays out the disk image with [dmgbuild](https://github.com/dmgbuild/dmgbuild), which it runs through [uv](https://docs.astral.sh/uv/) or pipx (`brew install uv`). The app is ad-hoc signed, which is enough on your own Mac; other Macs need a Developer ID signature and notarisation.
 
 **Windows**
 
@@ -199,7 +199,9 @@ src/pipeline.rs   window -> GPU-ready polylines (batched, cancellable)
 src/overview.rs   background spectral overview
 src/app/          egui UI: trace view, wgpu renderer, head map, sidebar, navigator
 src/platform.rs   screen size, system fonts, Finder "open file" events
+src/icon.rs       the app icon (a piglet in an EEG headset), drawn in code
 tests/files.rs    end-to-end tests on generated EDF/BDF files
+scripts/          macOS app and disk image, Windows cross-compile
 samples/          the built-in sample recording and its source and license
 examples/         dump.rs (print samples, for cross-checking), synth.rs (large synthetic files)
 ```

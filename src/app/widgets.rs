@@ -34,7 +34,7 @@ pub fn pill(ui: &mut Ui, pal: &Palette, caption: &str, value: &str, open: bool) 
 pub fn chevron(p: &egui::Painter, c: Pos2, size: f32, color: Color32) {
     p.add(Shape::line(
         vec![pos2(c.x - size, c.y - size * 0.5), pos2(c.x, c.y + size * 0.5), pos2(c.x + size, c.y - size * 0.5)],
-        Stroke::new(1.3, color),
+        Stroke::new(1.3f32, color),
     ));
 }
 
@@ -55,7 +55,7 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut Ui, pal: &Palette, value: &mut T,
         resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, *label));
         if selected {
             ui.painter().rect_filled(r, CornerRadius::same(5), pal.raised);
-            ui.painter().rect_stroke(r, CornerRadius::same(5), Stroke::new(1.0, pal.border), StrokeKind::Inside);
+            ui.painter().rect_stroke(r, CornerRadius::same(5), Stroke::new(1.0f32, pal.border), StrokeKind::Inside);
         } else if resp.hovered() {
             ui.painter().rect_filled(r, CornerRadius::same(5), pal.border.gamma_multiply(0.5));
         }
@@ -85,7 +85,7 @@ pub fn icon_button(ui: &mut Ui, pal: &Palette, icon: Icon, active: bool, tooltip
         p.rect_filled(rect, CornerRadius::same(6), pal.hover);
     }
     let color = if active { pal.text } else { pal.muted };
-    let stroke = Stroke::new(1.3, color);
+    let stroke = Stroke::new(1.3f32, color);
     let c = rect.center();
     match icon {
         Icon::Sidebar => {

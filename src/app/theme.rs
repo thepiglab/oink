@@ -156,30 +156,30 @@ fn visuals(p: &Palette) -> Visuals {
     v.extreme_bg_color = p.bg;
     v.faint_bg_color = p.hover;
     v.code_bg_color = p.hover;
-    v.window_stroke = Stroke::new(1.0, p.border);
+    v.window_stroke = Stroke::new(1.0f32, p.border);
     v.window_corner_radius = CornerRadius::same(10);
     v.menu_corner_radius = CornerRadius::same(8);
     let shadow = Shadow { offset: [0, 6], blur: 18, spread: 0, color: Color32::from_black_alpha(if p.dark { 110 } else { 34 }) };
     v.popup_shadow = shadow;
     v.window_shadow = shadow;
     v.selection.bg_fill = p.accent_soft;
-    v.selection.stroke = Stroke::new(1.0, p.accent);
+    v.selection.stroke = Stroke::new(1.0f32, p.accent);
     v.hyperlink_color = p.accent;
     v.warn_fg_color = p.warn;
-    v.text_cursor.stroke = Stroke::new(1.5, p.accent);
+    v.text_cursor.stroke = Stroke::new(1.5f32, p.accent);
 
     let radius = CornerRadius::same(6);
     let w = &mut v.widgets;
     w.noninteractive.bg_fill = p.chrome;
     w.noninteractive.weak_bg_fill = p.chrome;
-    w.noninteractive.bg_stroke = Stroke::new(1.0, p.border);
-    w.noninteractive.fg_stroke = Stroke::new(1.0, p.text);
+    w.noninteractive.bg_stroke = Stroke::new(1.0f32, p.border);
+    w.noninteractive.fg_stroke = Stroke::new(1.0f32, p.text);
     w.noninteractive.corner_radius = radius;
     for (state, fill) in [(&mut w.inactive, p.hover), (&mut w.hovered, p.hover), (&mut w.active, p.border), (&mut w.open, p.hover)] {
         state.bg_fill = fill;
         state.weak_bg_fill = Color32::TRANSPARENT;
         state.bg_stroke = Stroke::NONE;
-        state.fg_stroke = Stroke::new(1.0, p.text);
+        state.fg_stroke = Stroke::new(1.0f32, p.text);
         state.corner_radius = radius;
         state.expansion = 0.0;
     }

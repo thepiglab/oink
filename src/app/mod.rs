@@ -405,7 +405,7 @@ impl App {
                     }
                     .draw(ui.painter(), thumb, pal, None);
                 } else {
-                    ui.painter().circle_stroke(thumb.center(), 50.0 * 0.5 / 1.2, Stroke::new(1.0, pal.head.gamma_multiply(0.5)));
+                    ui.painter().circle_stroke(thumb.center(), 50.0 * 0.5 / 1.2, Stroke::new(1.0f32, pal.head.gamma_multiply(0.5)));
                 }
                 let x = thumb.right() + 10.0;
                 let name_color = if available { pal.text } else { pal.faint };
@@ -570,7 +570,7 @@ impl App {
                     pos2(mark.left() + x * mark.width(), y + v)
                 })
                 .collect();
-            ui.painter().add(egui::Shape::line(pts, Stroke::new(1.4, color)));
+            ui.painter().add(egui::Shape::line(pts, Stroke::new(1.4f32, color)));
         }
         ui.add_space(14.0);
         ui.label(RichText::new("Open an EEG recording").font(theme::font(17.0)));
@@ -753,7 +753,7 @@ impl eframe::App for App {
             let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("drop")));
             p.rect_filled(screen, 0.0, pal.bg.gamma_multiply(0.85));
             let r = screen.shrink(24.0);
-            p.rect_stroke(r, CornerRadius::same(12), Stroke::new(2.0, pal.accent), StrokeKind::Inside);
+            p.rect_stroke(r, CornerRadius::same(12), Stroke::new(2.0f32, pal.accent), StrokeKind::Inside);
             p.text(r.center(), Align2::CENTER_CENTER, "Drop to open", theme::font(18.0), pal.accent);
         }
         if self.help {

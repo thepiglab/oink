@@ -7,19 +7,33 @@ name: build
 on:
   push:
     branches: [main]
+    paths-ignore: ['**.md']
   pull_request:
+    paths-ignore: ['**.md']
   workflow_dispatch:
+
+# A newer push cancels the older run, except on main, where a run that has started is left to
+# finish (it may be publishing a release) and only one still waiting to start is replaced.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
+
+env:
+  # Tests use the dev profile, whose dependencies are optimised (see Cargo.toml): checked
+  # arithmetic without fat LTO on every test binary. Debug info would only slow linking.
+  CARGO_PROFILE_DEV_DEBUG: 0
 
 jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --release
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
       - run: cargo build --release
       - name: Package
         shell: pwsh
@@ -28,7 +42,7 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item target/release/oink.exe "dist/Oink.exe"
           Compress-Archive -Path "dist/Oink.exe" -DestinationPath "dist/Oink-$version-windows-x64.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: dist/*.zip
@@ -36,13 +50,14 @@ jobs:
   macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
-      - run: cargo test --release
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
       - run: ./scripts/bundle-macos.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos
           path: dist/*.dmg
@@ -54,7 +69,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Is this version released yet?
         id: version
         env:
@@ -68,7 +83,7 @@ jobs:
             echo "new=true" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.version.outputs.new == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true

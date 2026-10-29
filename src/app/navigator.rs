@@ -58,14 +58,14 @@ impl Navigator {
             }
             last_x = x;
             let color = if a.source == AnnotationSource::Trigger { pal.trigger } else { pal.event };
-            p.vline(x, strip.top()..=strip.top() + 7.0, Stroke::new(1.0, color));
+            p.vline(x, strip.top()..=strip.top() + 7.0, Stroke::new(1.0f32, color));
         }
-        p.rect_stroke(strip, CornerRadius::same(5), Stroke::new(1.0, pal.border), StrokeKind::Inside);
+        p.rect_stroke(strip, CornerRadius::same(5), Stroke::new(1.0f32, pal.border), StrokeKind::Inside);
 
         // The current page.
         let view = Rect::from_min_max(pos2(x_of(doc.t0), strip.top()), pos2(x_of(doc.t0 + page).max(x_of(doc.t0) + 3.0), strip.bottom()));
         p.rect_filled(view, CornerRadius::same(3), pal.accent_soft);
-        p.rect_stroke(view, CornerRadius::same(3), Stroke::new(1.5, pal.accent), StrokeKind::Inside);
+        p.rect_stroke(view, CornerRadius::same(3), Stroke::new(1.5f32, pal.accent), StrokeKind::Inside);
 
         let resp = ui.interact(strip, ui.id().with("navigator"), Sense::click_and_drag());
         if let Some(pos) = resp.interact_pointer_pos().filter(|_| resp.dragged() || resp.clicked() || resp.drag_started()) {
@@ -73,7 +73,7 @@ impl Navigator {
             doc.clamp_view(page);
         }
         if let Some(pos) = resp.hover_pos() {
-            p.vline(pos.x, strip.y_range(), Stroke::new(1.0, pal.text.gamma_multiply(0.5)));
+            p.vline(pos.x, strip.y_range(), Stroke::new(1.0f32, pal.text.gamma_multiply(0.5)));
             let t = t_of(pos.x);
             chip(p, pos2(pos.x, strip.top() - 2.0), Align2::CENTER_BOTTOM, &doc.file.clock(t).time_string(false), pal.text, pal.raised, pal.border);
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);

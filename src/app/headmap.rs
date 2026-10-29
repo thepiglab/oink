@@ -82,7 +82,7 @@ impl HeadMap<'_> {
             for name in TEN_TWENTY {
                 let (id, _) = electrode(name).expect("10-20 site");
                 if !recorded.contains(&id) {
-                    p.circle_stroke(at(id), 2.6, Stroke::new(1.0, pal.head));
+                    p.circle_stroke(at(id), 2.6, Stroke::new(1.0f32, pal.head));
                 }
             }
         }
@@ -139,7 +139,7 @@ impl HeadMap<'_> {
             };
             if average && in_use && self.detailed {
                 // Each of these electrodes contributes to the average reference.
-                p.circle_stroke(pos, dot + 2.5, Stroke::new(1.0, base.gamma_multiply(0.35)));
+                p.circle_stroke(pos, dot + 2.5, Stroke::new(1.0f32, base.gamma_multiply(0.35)));
             }
             p.circle_filled(pos, if hot { dot + 1.2 } else { dot }, fill);
             if self.detailed && (recorded.len() <= 48 || hot) {
