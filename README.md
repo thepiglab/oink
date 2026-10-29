@@ -37,7 +37,7 @@ To build it yourself:
 ./scripts/bundle-macos.sh
 ```
 
-This builds `dist/Oink.app` and `dist/Oink-0.1.0-macos.dmg`. Drag the app into Applications. It then opens `.edf`, `.bdf` and `.rec` files from Finder, by double-click, with "Open With", or by dropping a file on its Dock icon. The script builds a universal (Apple silicon + Intel) app when both Rust targets are installed, and lays out the disk image with [dmgbuild](https://github.com/dmgbuild/dmgbuild), which it runs through [uv](https://docs.astral.sh/uv/) or pipx (`brew install uv`). The app is ad-hoc signed, which is enough on your own Mac; other Macs need a Developer ID signature and notarisation.
+This builds `dist/Oink.app` and `dist/Oink-<version>-macos.dmg`. Drag the app into Applications. It then opens `.edf`, `.bdf` and `.rec` files from Finder, by double-click, with "Open With", or by dropping a file on its Dock icon. The script builds a universal (Apple silicon + Intel) app when both Rust targets are installed, and lays out the disk image with [dmgbuild](https://github.com/dmgbuild/dmgbuild), which it runs through [uv](https://docs.astral.sh/uv/) or pipx (`brew install uv`). The app is ad-hoc signed, which is enough on your own Mac; other Macs need a Developer ID signature and notarisation.
 
 **Windows**
 
