@@ -4,6 +4,7 @@
 pub mod dsp;
 pub mod edf;
 pub mod leads;
+pub mod maps;
 pub mod montage;
 pub mod overview;
 pub mod pipeline;

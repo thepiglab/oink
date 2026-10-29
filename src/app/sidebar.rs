@@ -3,10 +3,12 @@
 use eframe::egui::{self, Align, CornerRadius, Layout, RichText, ScrollArea, Sense, vec2};
 use oink_eeg::edf::AnnotationSource;
 use oink_eeg::leads::{Kind, Numbering};
+use oink_eeg::maps;
 use serde::{Deserialize, Serialize};
 
 use super::doc::Doc;
 use super::headmap::{self, HeadMap};
+use super::scalp::{self, ScalpMap};
 use super::theme::{self, Palette};
 use super::traces::{fmt_clock, fmt_hz, fmt_seconds, trace_color};
 use super::widgets;
@@ -19,7 +21,7 @@ pub enum Tab {
     File,
 }
 
-pub fn ui(ui: &mut egui::Ui, doc: &mut Doc, s: &mut Settings) {
+pub fn ui(ui: &mut egui::Ui, doc: &mut Doc, s: &mut Settings, open_menu: &mut Option<String>) {
     let pal = theme::palette(ui.ctx());
     ui.add_space(10.0);
     ui.horizontal(|ui| {
@@ -33,15 +35,35 @@ pub fn ui(ui: &mut egui::Ui, doc: &mut Doc, s: &mut Settings) {
     });
     ui.add_space(8.0);
     match s.tab {
-        Tab::Montage => montage_tab(ui, doc, s, pal),
+        Tab::Montage => montage_tab(ui, doc, s, pal, open_menu),
         Tab::Events => events_tab(ui, doc, s, pal),
         Tab::File => file_tab(ui, doc, pal),
     }
 }
 
-fn montage_tab(ui: &mut egui::Ui, doc: &mut Doc, s: &Settings, pal: &Palette) {
-    ui.label(RichText::new(doc.montage_name()).font(theme::font(15.0)));
-    ui.label(RichText::new(headmap::caption(&doc.montage)).color(pal.muted).small());
+fn montage_tab(ui: &mut egui::Ui, doc: &mut Doc, s: &mut Settings, pal: &Palette, open_menu: &mut Option<String>) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(doc.montage_name()).font(theme::font(15.0)));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            scalp::picker(ui, pal, &mut s.map, doc.map_nyquist(), open_menu);
+        });
+    });
+
+    // The scalp map of the page on screen, or of the measured selection.
+    let measure = s.map.filter(|_| doc.map_nyquist().is_ok());
+    if let Some(m) = measure {
+        let (t0, t1) = map_span(doc, s.page);
+        doc.request_map((m, t0, t1), ui.ctx());
+    }
+    let scalp = measure.and(doc.scalp.as_ref());
+    let caption = match scalp {
+        _ if measure.is_none() => headmap::caption(&doc.montage),
+        None => "Computing the map\u{2026}".to_string(),
+        Some((_, Err(reason))) => reason.clone(),
+        Some((_, Ok(m))) => map_caption(doc, m),
+    };
+    ui.label(RichText::new(caption).color(pal.muted).small());
+    let scalp = scalp.and_then(|(_, r)| r.as_ref().ok());
 
     let size = ui.available_width().min(300.0);
     let (rect, resp) = headmap::allocate(ui, size);
@@ -55,8 +77,14 @@ fn montage_tab(ui: &mut egui::Ui, doc: &mut Doc, s: &Settings, pal: &Palette) {
         highlight_electrode: doc.hover_electrode,
         hemisphere_colors: s.hemisphere_colors,
         detailed: true,
+        scalp,
     };
     let hovered = map.draw(ui.painter(), rect, pal, pointer);
+    if let Some(m) = scalp {
+        // Into the margin the square leaves under the head (kept for the nose at the top).
+        ui.add_space(-size * 0.09);
+        scalp::legend(ui, pal, m, size);
+    }
     if let Some(e) = hovered {
         let names: Vec<String> = doc.channels_with(e).map(|i| doc.montage.channels[i].label.clone()).collect();
         let info = e.info();
@@ -71,6 +99,9 @@ fn montage_tab(ui: &mut egui::Ui, doc: &mut Doc, s: &Settings, pal: &Palette) {
             }
             if !names.is_empty() {
                 ui.label(RichText::new(names.join(", ")).small());
+            }
+            if let Some((m, v)) = scalp.and_then(|m| Some((m, m.value(e)?))) {
+                ui.label(format!("{} {}", m.measure.label(), m.format(v)));
             }
         });
     }
@@ -170,6 +201,27 @@ fn montage_tab(ui: &mut egui::Ui, doc: &mut Doc, s: &Settings, pal: &Palette) {
     if let Some(i) = select {
         doc.selected_channel = if doc.selected_channel == Some(i) { None } else { Some(i) };
     }
+}
+
+/// What a scalp map covers: the measured selection if there is one long enough, else the page.
+fn map_span(doc: &Doc, page: f64) -> (f64, f64) {
+    match doc.measure {
+        Some((a, b)) if (b - a).abs() >= maps::MIN_SPAN => (a.min(b), a.max(b)),
+        _ => (doc.t0, (doc.t0 + page).min(doc.range.1)),
+    }
+}
+
+fn map_caption(doc: &Doc, m: &ScalpMap) -> String {
+    let span = fmt_seconds(m.t1 - m.t0);
+    let selected = doc.measure.is_some_and(|(a, b)| a.min(b) == m.t0 && a.max(b) == m.t1);
+    let mut text = format!("Average reference \u{b7} {}", if selected { format!("selection, {span}") } else { format!("{span} on screen") });
+    if m.sampled {
+        text += " \u{b7} sampled";
+    }
+    if m.skipped > 0 {
+        text += " \u{b7} gaps left out";
+    }
+    text
 }
 
 fn events_tab(ui: &mut egui::Ui, doc: &mut Doc, s: &Settings, pal: &Palette) {

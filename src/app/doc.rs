@@ -11,9 +11,12 @@ use eframe::egui;
 use oink_eeg::dsp::FilterSettings;
 use oink_eeg::edf::{Annotation, EdfFile};
 use oink_eeg::leads::{ElectrodeId, Kind, LeadSet};
+use oink_eeg::maps;
 use oink_eeg::montage::{self, Montage, MontageId, SignalStats};
 use oink_eeg::overview::{self, Overview};
 use oink_eeg::pipeline::{self, TraceData, TraceRequest};
+
+use super::scalp::{MapKey, MapResult, MapWorker};
 
 /// Smallest lane height in points; with more channels than fit, the trace view scrolls.
 pub const MIN_LANE: f32 = 12.0;
@@ -79,6 +82,10 @@ pub struct Doc {
     pub v_scroll: f32,
     pub selected_event: Option<usize>,
     pub event_filter: String,
+    /// The latest scalp map, or why it could not be made.
+    pub scalp: Option<MapResult>,
+    /// Started on the first map request.
+    maps: Option<MapWorker>,
     worker: TraceWorker,
     requested: VecDeque<Requested>,
     annotations_rx: Receiver<Vec<Annotation>>,
@@ -189,6 +196,8 @@ impl Doc {
             v_scroll: 0.0,
             selected_event: None,
             event_filter: String::new(),
+            scalp: None,
+            maps: None,
             worker: TraceWorker::new(ctx.clone()),
             requested: VecDeque::new(),
             annotations_rx,
@@ -289,6 +298,9 @@ impl Doc {
         if let Some(ov) = self.overview_slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
             self.overview = Some(ov);
             self.overview_version += 1;
+        }
+        if let Some(result) = self.maps.as_ref().and_then(MapWorker::take) {
+            self.scalp = Some(result);
         }
         if let Some(err) = self.worker.error.lock().unwrap_or_else(|e| e.into_inner()).take() {
             self.read_error = Some(err);
@@ -408,6 +420,37 @@ impl Doc {
             self.selected_event = Some(i);
             self.jump_to(self.annotations[i].onset, page);
         }
+    }
+
+    /// The average-reference montage that scalp maps are computed from.
+    fn map_montage(&self) -> Result<&Arc<Montage>, &str> {
+        match self.montages.iter().find(|m| m.id == MontageId::Average).map(|m| &m.montage) {
+            Some(Ok(m)) => Ok(m),
+            Some(Err(reason)) => Err(reason),
+            None => Err("No scalp EEG."),
+        }
+    }
+
+    /// The highest frequency the mapped electrodes carry, or why this file cannot be mapped.
+    pub fn map_nyquist(&self) -> Result<f64, &str> {
+        let m = self.map_montage()?;
+        maps::electrodes(m).next().map(|c| c.fs / 2.0).ok_or("No scalp EEG.")
+    }
+
+    /// Asks for a scalp map; it arrives through `poll`.
+    pub fn request_map(&mut self, key: MapKey, ctx: &egui::Context) {
+        if self.maps.is_none() {
+            let Ok(avg) = self.map_montage() else { return };
+            self.maps = Some(MapWorker::new(self.file.clone(), avg.clone(), ctx.clone(), self.cancel.clone()));
+        }
+        if let Some(w) = &mut self.maps {
+            w.request(key);
+        }
+    }
+
+    /// True while a requested map has not arrived.
+    pub fn map_pending(&self) -> bool {
+        self.maps.as_ref().and_then(MapWorker::requested).is_some_and(|k| self.scalp.as_ref().is_none_or(|(have, _)| *have != k))
     }
 
     /// Channels whose derivation involves `e`.

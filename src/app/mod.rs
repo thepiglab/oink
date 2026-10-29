@@ -5,6 +5,7 @@ mod headmap;
 mod navigator;
 mod renderer;
 mod sample;
+mod scalp;
 mod sidebar;
 mod theme;
 mod traces;
@@ -17,6 +18,7 @@ use eframe::egui::{
     StrokeKind, ThemePreference, ViewportCommand, pos2, vec2,
 };
 use oink_eeg::dsp::FilterSettings;
+use oink_eeg::maps::Measure;
 use oink_eeg::montage::MontageId;
 use serde::{Deserialize, Serialize};
 
@@ -53,6 +55,8 @@ pub struct Settings {
     pub page: f64,
     pub sidebar: bool,
     pub tab: Tab,
+    /// Scalp map drawn on the sidebar's head instead of the montage's lines.
+    pub map: Option<Measure>,
     pub recent: Vec<PathBuf>,
 }
 
@@ -68,6 +72,7 @@ impl Default for Settings {
             page: 10.0,
             sidebar: true,
             tab: Tab::Montage,
+            map: None,
             recent: Vec::new(),
         }
     }
@@ -83,11 +88,12 @@ pub struct Launch {
     pub page: Option<f64>,
     pub sidebar: Option<bool>,
     pub tab: Option<Tab>,
+    pub map: Option<Measure>,
     /// Open the built-in sample recording.
     pub sample: bool,
     /// Render a frame to this PNG and quit.
     pub screenshot: Option<PathBuf>,
-    /// Open a toolbar menu at start ("montage", "filters", "settings"), for screenshots.
+    /// Open a menu at start ("montage", "filters", "settings", "map"), for screenshots.
     pub menu: Option<String>,
     /// An EDFbrowser montage file to load and show.
     pub montage_file: Option<PathBuf>,
@@ -141,6 +147,9 @@ impl App {
         }
         if let Some(t) = launch.tab {
             settings.tab = t;
+        }
+        if launch.map.is_some() {
+            settings.map = launch.map;
         }
         let gpu = match &cc.wgpu_render_state {
             Some(rs) => {
@@ -402,6 +411,7 @@ impl App {
                         highlight_electrode: None,
                         hemisphere_colors: self.settings.hemisphere_colors,
                         detailed: false,
+                        scalp: None,
                     }
                     .draw(ui.painter(), thumb, pal, None);
                 } else {
@@ -663,6 +673,7 @@ impl App {
                         && !d.loading(self.settings.page)
                         && d.annotations_ready
                         && d.overview.as_ref().is_none_or(|o| o.done)
+                        && !d.map_pending()
                 }
                 None => true,
             };
@@ -736,7 +747,7 @@ impl eframe::App for App {
                     .default_width(300.0)
                     .width_range(250.0..=480.0)
                     .frame(Frame::new().fill(pal.chrome).inner_margin(Margin { left: 14, right: 12, top: 0, bottom: 0 }))
-                    .show(ctx, |ui| sidebar::ui(ui, doc, &mut self.settings));
+                    .show(ctx, |ui| sidebar::ui(ui, doc, &mut self.settings, &mut self.open_menu));
             }
         }
         egui::CentralPanel::default().frame(Frame::new().fill(pal.bg)).show(ctx, |ui| {

@@ -27,6 +27,8 @@ Options:
   --theme NAME       system | light | dark
   --no-sidebar       start with the sidebar hidden
   --tab NAME         montage | events | file
+  --map NAME         scalp map on the sidebar's head: delta | theta | alpha | beta | gamma |
+                     alpha-delta | theta-beta | slow-fast
   --size WxH         window size in points
   --screenshot PNG   render the window to PNG and quit
 ";
@@ -87,6 +89,10 @@ fn parse(args: &[String]) -> Result<Command, String> {
                     "file" => Tab::File,
                     other => return Err(format!("unknown tab {other:?}")),
                 })
+            }
+            "--map" => {
+                let v = value("--map")?;
+                launch.map = Some(oink_eeg::maps::Measure::from_key(&v).ok_or_else(|| format!("unknown map {v:?}"))?);
             }
             "--size" => {
                 let v = value("--size")?;

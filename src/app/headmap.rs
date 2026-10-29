@@ -1,5 +1,6 @@
 //! Head diagram: electrodes in their 10-10 positions with the montage's derivations drawn
-//! between them. Used at full size in the sidebar and as thumbnails in the montage picker.
+//! between them, or with a scalp map under them. Used at full size in the sidebar and as
+//! thumbnails in the montage picker.
 
 use std::collections::BTreeSet;
 
@@ -7,6 +8,7 @@ use eframe::egui::{self, Color32, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2
 use oink_eeg::leads::{ElectrodeId, LeadSet, Side, Site, TEN_TWENTY, electrode};
 use oink_eeg::montage::Montage;
 
+use super::scalp::ScalpMap;
 use super::theme::{self, Palette};
 
 pub struct HeadMap<'a> {
@@ -19,6 +21,8 @@ pub struct HeadMap<'a> {
     pub hemisphere_colors: bool,
     /// Full size: electrode names and the empty 10-20 sites.
     pub detailed: bool,
+    /// A scalp map to draw in place of the derivations.
+    pub scalp: Option<&'a ScalpMap>,
 }
 
 /// Room for the ears, nose and eye electrodes outside the head circle (and, at full size,
@@ -37,6 +41,26 @@ impl HeadMap<'_> {
             to(info.x, info.y)
         };
         let line_w = if self.detailed { 1.3 } else { 1.0 };
+
+        if let Some(m) = self.scalp {
+            // A disc textured with the map; head-map units [-1, 1] span the texture.
+            let mut disc = egui::Mesh::with_texture(m.texture.id());
+            let vertex = |x: f32, y: f32| egui::epaint::Vertex { pos: to(x, y), uv: pos2(0.5 + 0.5 * x, 0.5 - 0.5 * y), color: Color32::WHITE };
+            disc.vertices.push(vertex(0.0, 0.0));
+            let steps = 180;
+            for k in 0..=steps {
+                let a = std::f32::consts::TAU * k as f32 / steps as f32;
+                disc.vertices.push(vertex(a.cos(), a.sin()));
+            }
+            for k in 0..steps as u32 {
+                disc.add_triangle(0, k + 1, k + 2);
+            }
+            p.add(Shape::mesh(disc));
+            let ink = Stroke::new(0.8f32, Color32::from_black_alpha(80));
+            for [a, b] in &m.contours {
+                p.line_segment([to(a[0], a[1]), to(b[0], b[1])], ink);
+            }
+        }
 
         // Head outline, nose and ears.
         let outline = Stroke::new(line_w, pal.head);
@@ -90,7 +114,7 @@ impl HeadMap<'_> {
         // Derivations between two electrodes: the montage's chains.
         let mut lines: Vec<(Pos2, Pos2, Color32, f32)> = Vec::new();
         for (i, c) in self.montage.channels.iter().enumerate() {
-            if self.visible.is_some_and(|v| !v[i]) {
+            if self.scalp.is_some() || self.visible.is_some_and(|v| !v[i]) {
                 continue;
             }
             let (Some(a), Some(b)) = (c.a, c.b) else { continue };
@@ -137,11 +161,18 @@ impl HeadMap<'_> {
             } else {
                 pal.faint
             };
-            if average && in_use && self.detailed {
-                // Each of these electrodes contributes to the average reference.
-                p.circle_stroke(pos, dot + 2.5, Stroke::new(1.0f32, base.gamma_multiply(0.35)));
+            if self.scalp.is_some() {
+                // Dark with a light rim, to show on any colour of the map.
+                let r = if hot { dot + 1.2 } else { dot * 0.8 };
+                p.circle_filled(pos, r, if hot { pal.accent } else { Color32::from_black_alpha(200) });
+                p.circle_stroke(pos, r, Stroke::new(1.0f32, Color32::from_white_alpha(190)));
+            } else {
+                if average && in_use && self.detailed {
+                    // Each of these electrodes contributes to the average reference.
+                    p.circle_stroke(pos, dot + 2.5, Stroke::new(1.0f32, base.gamma_multiply(0.35)));
+                }
+                p.circle_filled(pos, if hot { dot + 1.2 } else { dot }, fill);
             }
-            p.circle_filled(pos, if hot { dot + 1.2 } else { dot }, fill);
             if self.detailed && (recorded.len() <= 48 || hot) {
                 let name = self
                     .leads

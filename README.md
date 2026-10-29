@@ -10,6 +10,7 @@ A small, fast viewer for EEG recordings in EDF, EDF+, BDF and BDF+. Native on ma
 - **Works out what every signal is.** It reads labels, type prefixes and units ("EEG FP1-REF", "C4-M1", "Fc5.", "EEG T3-LE", "EKG1", "SaO2"), places electrodes on the 10-10 map (T3 stays T3 but sits at T7), and identifies the reference. Signals are always matched by label, never by their position in the file.
 - **Montages are built for you.** Pick double banana (ACNS LB-18.1), transverse (TB-18.1), average reference, TUH's TCP, or "as recorded". Montages work even from bipolar recordings, and EDFbrowser `.mtg` files load too.
 - **Shows montages on the head.** The sidebar draws the active montage's derivations on a head diagram. Hover a trace to see its electrodes, or hover an electrode to see its traces. The montage picker previews each montage the same way.
+- **Maps band power on the head.** The same head can show a scalp map of delta, theta, alpha, beta or gamma power, or of the alpha/delta, theta/beta or slow/fast ratio, for the page on screen or a measured selection.
 - **Clinical conventions, done properly.**
   - Sensitivity is in real µV per millimetre of your screen.
   - Negative is up (the EDF+ convention); this is a setting.
@@ -89,11 +90,18 @@ The toolbar shows the four things that change how EEG looks: montage, filters, s
 
 **Sidebar**
 
-- **Montage:** the head diagram, a summary of what was identified (for example "19/19 standard 10-20 sites · referenced to REF · T3/T4/T5/T6 naming"), labels that could not be placed, and a channel list with show/hide.
+- **Montage:** the head diagram (or a scalp map, from the **Map** menu), a summary of what was identified (for example "19/19 standard 10-20 sites · referenced to REF · T3/T4/T5/T6 naming"), labels that could not be placed, and a channel list with show/hide.
 - **Events:** EDF+ annotations and decoded trigger codes, searchable. Click one to jump to it.
 - **File:** recording and patient fields (EDF+ subfields decoded), every signal's header, and a header check that explains problems in plain language, such as a truncated file or a digital range that does not fit the sample size.
 
 **Overview strip.** The strip along the bottom is a spectral overview (density spectral array) of the whole recording. Each frequency is shown relative to its own median, so sleep stages, seizures and artefacts stand out. Event ticks run along its top edge. It is computed in the background, coarse to fine, so a long recording has a usable overview within a moment.
+
+**Scalp maps.** The **Map** menu next to the montage name colours the head by one measure per electrode:
+
+- **Band power** as a share of 1–45 Hz power: delta 1–4 Hz, theta 4–8, alpha 8–13, beta 13–30, gamma 30–45. The range stops below 50 Hz, so mains hum is left out.
+- **Ratios:** alpha/delta, theta/beta, and slow/fast, (δ + θ)/(α + β). Ratios are coloured on a log scale, so halving and doubling look alike.
+
+Each electrode is taken against the average of all scalp electrodes, whatever montage is on screen: band power belongs to an electrode, while a bipolar channel's power describes the difference between two. Spectra use Welch's method (2 s Hann windows overlapping by half) on the unfiltered signals, over the page on screen or, once you drag a selection of at least 1 s, that selection. Spans with more than 120 windows are sampled evenly, and windows touching a gap are left out. Values are interpolated over the head with spherical splines (Perrin et al., 1989), coloured with viridis from the lowest to the highest electrode, with contour lines between. Hover an electrode for its value.
 
 **Command line**
 
@@ -101,6 +109,7 @@ The toolbar shows the four things that change how EEG looks: montage, filters, s
 oink --sample                   # open the built-in sample recording
 oink --info recording.edf       # what the viewer makes of a file: header, leads, montages, warnings
 oink recording.edf --montage banana --at 600 --page 20 --theme dark
+oink recording.edf --map alpha-delta    # start with a scalp map (delta, theta, alpha, ... slow-fast)
 oink recording.edf --montage my.mtg --screenshot page.png   # render a page to PNG and quit
 ```
 
@@ -195,6 +204,7 @@ src/edf.rs        EDF/EDF+/BDF/BDF+ reader: header, positioned reads, TALs, EDF+
 src/leads.rs      lead identification and the 10-10 electrode map
 src/montage.rs    montage graph, ACNS/TUH templates, average reference, EDFbrowser .mtg
 src/dsp.rs        zero-phase filters and M4 decimation
+src/maps.rs       band power per electrode and spherical-spline scalp maps
 src/pipeline.rs   window -> GPU-ready polylines (batched, cancellable)
 src/overview.rs   background spectral overview
 src/app/          egui UI: trace view, wgpu renderer, head map, sidebar, navigator
@@ -206,7 +216,7 @@ samples/          the built-in sample recording and its source and license
 examples/         dump.rs (print samples, for cross-checking), synth.rs (large synthetic files)
 ```
 
-`cargo test` runs the unit tests and generated-file tests: shuffled channel order, EDF+D gaps, sub-second starts, 24-bit BDF and Status triggers, truncated files, mixed sampling rates and mV units. Decoded samples and annotations were also cross-checked against MNE on a real Nihon Kohden recording.
+`cargo test` runs the unit tests and generated-file tests: shuffled channel order, EDF+D gaps, sub-second starts, 24-bit BDF and Status triggers, truncated files, mixed sampling rates and mV units, and band-power maps that find alpha and delta where a file puts them. The bundled sample's band powers are checked against SciPy's Welch estimate. Decoded samples and annotations were also cross-checked against MNE on a real Nihon Kohden recording.
 
 ## Limitations
 

@@ -1,12 +1,14 @@
 //! End-to-end tests on generated EDF/BDF files: header parsing, sample decoding, EDF+
-//! timekeeping, triggers, damaged files, and montages that must not depend on channel order.
+//! timekeeping, triggers, damaged files, montages that must not depend on channel order, and
+//! band-power maps.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use oink_eeg::dsp::{BREAK, FilterSettings};
 use oink_eeg::edf::{AnnotationSource, EdfFile, Format};
-use oink_eeg::leads::LeadSet;
+use oink_eeg::leads::{LeadSet, TEN_TWENTY, electrode};
+use oink_eeg::maps::{self, Measure};
 use oink_eeg::montage::{self, MontageId};
 use oink_eeg::pipeline::{self, TraceRequest};
 
@@ -347,6 +349,90 @@ fn montages_do_not_depend_on_channel_order() {
                 assert!((x - y).abs() < 1e-3, "{id:?} {la}: {x} vs {y}");
             }
         }
+    }
+}
+
+#[test]
+fn band_power_maps_find_posterior_alpha_and_frontal_delta() {
+    use std::f64::consts::TAU;
+    let sigs: Vec<Sig> = TUH.iter().map(|l| sig(l, "uV", 250)).collect();
+    let spec = Spec { bdf: false, reserved: "", records_field: "12".into(), duration: "1", sigs, records: 12 };
+    let path = write(
+        "bands.edf",
+        &spec,
+        |i, r, j| {
+            let t = (r * 250 + j) as f64 / 250.0;
+            let alpha = if TUH[i].contains(" O") { 40.0 } else { 0.0 };
+            let delta = if TUH[i].contains(" FP") { 60.0 } else { 0.0 };
+            let uv = alpha * (TAU * 10.0 * t).sin()
+                + delta * (TAU * 2.0 * t).sin()
+                + 8.0 * (TAU * 6.0 * t + i as f64).sin()
+                + 3.0 * (TAU * 20.0 * t + 2.0 * i as f64).sin();
+            (uv * 10.0) as i32 // 0.1 µV per digital unit
+        },
+        |_| Vec::new(),
+    );
+    let file = EdfFile::open(&path).unwrap();
+    let leads = LeadSet::identify(&file.signals);
+    let stats = pipeline::signal_stats(&file, &leads);
+    let avg = montage::build(MontageId::Average, &leads, &file.signals, &stats).unwrap();
+    let s = maps::band_powers(&file, &avg, 1.0, 11.0, &|| false).unwrap().unwrap();
+    assert_eq!((s.powers.len(), s.segments, s.skipped, s.sampled), (19, 9, 0, false));
+
+    let value = |m: Measure, name: &str| {
+        let e = electrode(name).unwrap().0;
+        m.value(s.powers.iter().find(|p| p.electrode == e).unwrap()).unwrap()
+    };
+    let top_two = |m: Measure| {
+        let mut v: Vec<(&str, f64)> = TEN_TWENTY.iter().map(|n| (*n, value(m, n))).collect();
+        v.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let mut names = [v[0].0, v[1].0];
+        names.sort();
+        names
+    };
+    assert_eq!(top_two(Measure::Alpha), ["O1", "O2"]);
+    assert_eq!(top_two(Measure::Delta), ["Fp1", "Fp2"]);
+    assert!(value(Measure::Alpha, "O1") > 80.0, "{}", value(Measure::Alpha, "O1"));
+    assert!(value(Measure::AlphaDelta, "O2") > 10.0 && value(Measure::AlphaDelta, "Fp2") < 0.1);
+}
+
+/// The bundled sample's band powers against `scipy.signal.welch` on the same data, read with MNE:
+/// average reference over the 19 scalp electrodes, 0-10 s, 2 s Hann segments overlapping by half.
+#[test]
+fn sample_band_powers_match_scipy() {
+    // (electrode, alpha 8-13 Hz and delta 1-4 Hz as % of 1-45 Hz power)
+    const SCIPY: [(&str, f64, f64); 19] = [
+        ("Fp1", 63.737, 14.484),
+        ("Fp2", 49.429, 24.492),
+        ("F3", 60.753, 15.808),
+        ("F4", 60.499, 18.819),
+        ("F7", 18.372, 63.667),
+        ("F8", 31.839, 44.726),
+        ("T3", 37.385, 36.235),
+        ("T4", 39.919, 27.935),
+        ("C3", 26.310, 45.870),
+        ("C4", 34.404, 26.412),
+        ("T5", 43.173, 33.016),
+        ("T6", 47.355, 26.928),
+        ("P3", 61.860, 16.390),
+        ("P4", 67.954, 12.104),
+        ("O1", 62.675, 12.321),
+        ("O2", 74.634, 8.680),
+        ("Fz", 61.463, 18.199),
+        ("Cz", 25.310, 31.991),
+        ("Pz", 54.556, 21.938),
+    ];
+    let file = EdfFile::open(concat!(env!("CARGO_MANIFEST_DIR"), "/samples/Subject00_1.edf")).unwrap();
+    let leads = LeadSet::identify(&file.signals);
+    let stats = pipeline::signal_stats(&file, &leads);
+    let avg = montage::build(MontageId::Average, &leads, &file.signals, &stats).unwrap();
+    let s = maps::band_powers(&file, &avg, 0.0, 10.0, &|| false).unwrap().unwrap();
+    assert_eq!((s.powers.len(), s.segments), (19, 9));
+    for (name, alpha, delta) in SCIPY {
+        let e = electrode(name).unwrap().0;
+        let p = s.powers.iter().find(|p| p.electrode == e).unwrap();
+        let (a, d) = (Measure::Alpha.value(p).unwrap(), Measure::Delta.value(p).unwrap());
+        assert!((a - alpha).abs() < 0.01 && (d - delta).abs() < 0.01, "{name}: alpha {a:.4} vs {alpha}, delta {d:.4} vs {delta}");
     }
 }
 
