@@ -59,7 +59,7 @@ fn montage_tab(ui: &mut egui::Ui, doc: &mut Doc, s: &mut Settings, pal: &Palette
         _ if measure.is_none() => headmap::caption(&doc.montage),
         None => "Computing the map\u{2026}".to_string(),
         Some((_, Err(reason))) => reason.clone(),
-        Some((_, Ok(m))) => map_caption(doc, m),
+        Some((_, Ok(m))) => map_caption(doc, m, s.page),
     };
     ui.label(RichText::new(caption).color(pal.muted).small());
     let scalp = scalp.and_then(|(_, r)| r.as_ref().ok());
@@ -202,18 +202,36 @@ fn montage_tab(ui: &mut egui::Ui, doc: &mut Doc, s: &mut Settings, pal: &Palette
     }
 }
 
-/// What a scalp map covers: the measured selection if there is one long enough, else the page.
+/// Shortest page a scalp map covers as it is. A spectrum needs a few seconds, so shorter pages
+/// (zoomed in) are mapped over this much time around their centre.
+const MAP_MIN_PAGE: f64 = 2.0;
+
+/// What a scalp map covers: the measured selection if there is one long enough, else the page,
+/// widened to `MAP_MIN_PAGE` around its centre if it is shorter.
 fn map_span(doc: &Doc, page: f64) -> (f64, f64) {
-    match doc.measure {
-        Some((a, b)) if (b - a).abs() >= maps::MIN_SPAN => (a.min(b), a.max(b)),
-        _ => (doc.t0, (doc.t0 + page).min(doc.range.1)),
+    if let Some((a, b)) = doc.measure.filter(|(a, b)| (b - a).abs() >= maps::MIN_SPAN) {
+        return (a.min(b), a.max(b));
     }
+    let (lo, hi) = doc.range;
+    let (t0, t1) = (doc.t0, (doc.t0 + page).min(hi));
+    if t1 - t0 >= MAP_MIN_PAGE {
+        return (t0, t1);
+    }
+    let start = ((t0 + t1) / 2.0 - MAP_MIN_PAGE / 2.0).min(hi - MAP_MIN_PAGE).max(lo);
+    (start, (start + MAP_MIN_PAGE).min(hi))
 }
 
-fn map_caption(doc: &Doc, m: &ScalpMap) -> String {
+fn map_caption(doc: &Doc, m: &ScalpMap, page: f64) -> String {
     let span = fmt_seconds(m.t1 - m.t0);
     let selected = doc.measure.is_some_and(|(a, b)| a.min(b) == m.t0 && a.max(b) == m.t1);
-    let mut text = format!("Average reference \u{b7} {}", if selected { format!("selection, {span}") } else { format!("{span} on screen") });
+    let what = if selected {
+        format!("selection, {span}")
+    } else if m.t1 - m.t0 > page + 1e-9 {
+        format!("{span} around the page")
+    } else {
+        format!("{span} on screen")
+    };
+    let mut text = format!("Average reference \u{b7} {what}");
     if m.sampled {
         text += " \u{b7} sampled";
     }

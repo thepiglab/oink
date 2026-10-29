@@ -181,6 +181,10 @@ impl App {
             app.open(&cc.egui_ctx, path);
         }
         if let Some(doc) = &mut app.doc {
+            // A montage named on the command line wins over a sample's own choice.
+            if let Some(m) = launch.montage {
+                doc.set_montage(m);
+            }
             if let Some(f) = &launch.montage_file {
                 let i = doc.load_montage_file(f);
                 doc.set_montage_at(i);
